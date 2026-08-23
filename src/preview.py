@@ -370,10 +370,15 @@ def _calendar_events(doc: dict, config: dict) -> list[dict]:
         hue = SUBJECT_HUES.get(e["subject"], "#666")
         all_day = bool(e.get("all_day") or not e.get("start"))
         date = e["date"]
+        # Mirror the ICS exactly: an all-day event is DTSTART=date, DTEND=date+1
+        # (exclusive). Event Calendar needs that explicit end, or it spans the
+        # event across the whole grid instead of showing a single day.
+        next_day = (dt.date.fromisoformat(date) + dt.timedelta(days=1)).isoformat()
         obj = {
             "id": str(i),
             "title": e.get("title", ""),
             "start": date if all_day else f"{date} {e['start']}:00",
+            "end": next_day if all_day else f"{date} {e['end']}:00",
             "allDay": all_day,
             "backgroundColor": hue,
             "textColor": "#ffffff",
@@ -390,8 +395,6 @@ def _calendar_events(doc: dict, config: dict) -> list[dict]:
                 "color": hue,
             },
         }
-        if not all_day:
-            obj["end"] = f"{date} {e['end']}:00"
         out.append(obj)
     return out
 
