@@ -7,18 +7,26 @@ calendar_name: "UC MED Level 2 - 1st Bimonthly"
 # schedule is genuinely in another zone.
 timezone: "Asia/Manila"
 
-# Which section's events to publish:
+# Default section, and what the legacy combined schedule.ics contains:
 #   "ALL" -> keep everything (both sections + shared items)
 #   "A"   -> keep Section A events + shared ("ALL") events, drop Section B
 #   "B"   -> keep Section B events + shared ("ALL") events, drop Section A
+# When section_chooser is true (below), this is just the toggle's default
+# position; subscribers pick their own section on the published page.
 section: "B"
+
+# Let each subscriber choose Section A or B on the page (a toggle that swaps the
+# subscribe buttons and the calendar view). The build emits a per-section feed
+# set (schedule-a.ics / schedule-b.ics, plus per-section color feeds). Set to
+# false to publish a single section (the "section" value above) with no toggle.
+section_chooser: true
 
 # Include untimed items (independent study, reading assignments) as all-day
 # entries. Set to false if you only want fixed-time classes and exams.
 include_untimed: true
 
 # Also emit one feed per subject (schedule-pathology.ics, schedule-micro.ics, ...)
-# so you can subscribe to each and give it its own color in Apple Calendar.
+# so you can subscribe to each and give it its own color in Apple/Google Calendar.
 # The combined schedule.ics is always produced too. Subscribe to EITHER the
 # combined feed OR the per-subject set - not both (they share event IDs).
 emit_per_subject_feeds: true

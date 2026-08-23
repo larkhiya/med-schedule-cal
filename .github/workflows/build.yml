@@ -7,6 +7,7 @@ on:
       - "data/**"
       - "src/**"
       - "schema/**"
+      - "vendor/**"
       - "config.yaml"
       - ".github/workflows/build.yml"
   workflow_dispatch:

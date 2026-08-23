@@ -16,6 +16,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -93,40 +94,93 @@ def main() -> int:
 
     build_time = dt.datetime.now(tz=dt.timezone.utc)
     SITE.mkdir(exist_ok=True)
+    include_untimed = config.get("include_untimed", True)
+    per_subject = config.get("emit_per_subject_feeds")
 
-    # combined feed
-    cal, kept = ics_mod.build_calendar(doc, config, build_time=build_time)
-    ics_mod.write_ics(cal, str(SITE / "schedule.ics"))
-
-    # per-subject feeds (for a color per subject in Apple Calendar)
-    subject_feeds = []
-    if config.get("emit_per_subject_feeds"):
-        section = config.get("section", "ALL")
-        include_untimed = config.get("include_untimed", True)
-        present = []
+    def present_subjects(section: str) -> list[str]:
+        """Subjects that have at least one kept event in the given section,
+        in first-seen order (keeps a stable subject ordering on the page)."""
+        present: list[str] = []
         for e in doc.get("events", []):
             if ics_mod.keep_event(e, section, include_untimed):
                 if e["subject"] not in present:
                     present.append(e["subject"])
-        for subject in present:
+        return present
+
+    def build_subject_feeds(section: str, prefix: str, name_tag: str) -> list[dict]:
+        """Emit one feed per subject for `section`; return their page metadata."""
+        feeds = []
+        for subject in present_subjects(section):
             scal, scount = ics_mod.build_calendar(
-                doc, config, build_time=build_time,
-                subjects={subject}, name_suffix=subject,
+                doc, config, build_time=build_time, section=section,
+                subjects={subject}, name_suffix=f"{subject}{name_tag}",
             )
-            slug = ics_mod.subject_slug(subject)
-            fname = f"schedule-{slug}.ics"
+            fname = f"{prefix}{ics_mod.subject_slug(subject)}.ics"
             ics_mod.write_ics(scal, str(SITE / fname))
             url = f"{base}/{fname}" if base else fname
-            subject_feeds.append({"subject": subject, "url": url, "count": scount})
+            feeds.append({"subject": subject, "url": url, "count": scount})
+        return feeds
+
+    # Combined feed at the stable legacy URL (config's default section). Direct
+    # subscribers and existing subscriptions keep working regardless of the page.
+    cal, kept = ics_mod.build_calendar(doc, config, build_time=build_time)
+    ics_mod.write_ics(cal, str(SITE / "schedule.ics"))
+
+    # Section chooser: build a self-contained feed set per section so the page's
+    # A/B toggle can point each subscribe button at the right one.
+    section_data = None
+    subject_feeds = []
+    if config.get("section_chooser"):
+        section_data = {}
+        for sec in ("A", "B"):
+            scal, scount = ics_mod.build_calendar(
+                doc, config, build_time=build_time, section=sec,
+                name_suffix=f"Section {sec}",
+            )
+            fname = f"schedule-{sec.lower()}.ics"
+            ics_mod.write_ics(scal, str(SITE / fname))
+            subs = (build_subject_feeds(sec, f"schedule-{sec.lower()}-", f" (Section {sec})")
+                    if per_subject else [])
+            section_data[sec] = {
+                "url": f"{base}/{fname}" if base else fname,
+                "count": scount,
+                "subjects": subs,
+            }
+        print(f"Emitted section feeds A ({section_data['A']['count']} ev) "
+              f"and B ({section_data['B']['count']} ev).")
+    elif per_subject:
+        # Single-section color feeds (no chooser).
+        subject_feeds = build_subject_feeds(config.get("section", "ALL"), "schedule-", "")
         print(f"Emitted {len(subject_feeds)} per-subject feeds.")
 
     html_str = preview_mod.render(doc, config, report, ics_url, kept, build_time,
-                                  subject_feeds=subject_feeds)
+                                  subject_feeds=subject_feeds,
+                                  section_data=section_data, base_url=base)
     preview_mod.write_preview(html_str, str(SITE / "index.html"))
 
+    # Calendar view page + its vendored library (kept self-contained so the page
+    # loads fast, same-origin, with no external requests).
+    cal_html = preview_mod.render_calendar(doc, config, section_data, build_time, base_url=base)
+    preview_mod.write_preview(cal_html, str(SITE / "calendar.html"))
+    copy_vendor()
+
     emit_summary(report, kept, ics_url)
-    print(f"\nBuilt {kept} events -> site/schedule.ics and site/index.html")
+    print(f"\nBuilt {kept} events -> site/schedule.ics, site/index.html, site/calendar.html")
     return 0
+
+
+def copy_vendor() -> None:
+    """Copy the tracked vendored libraries into site/vendor/ for the Pages
+    artifact. No-op-safe if already up to date."""
+    src = ROOT / "vendor"
+    if not src.is_dir():
+        print("WARNING: vendor/ not found - calendar.html will not load its library.")
+        return
+    dst = SITE / "vendor"
+    dst.mkdir(parents=True, exist_ok=True)
+    for f in src.iterdir():
+        if f.is_file():
+            shutil.copyfile(f, dst / f.name)
 
 
 if __name__ == "__main__":

@@ -53,8 +53,6 @@ def _description(event: dict) -> str:
         lines.append(f"Section: {event['section']}")
     if event.get("notes"):
         lines.append(event["notes"])
-    if event.get("confidence") and event["confidence"] != "high":
-        lines.append(f"[Extraction confidence: {event['confidence']} - verify against source]")
     lines.append(f"Source: {event.get('source_ref', '')}")
     return "\n".join(lines)
 
@@ -79,12 +77,15 @@ def subject_slug(subject: str) -> str:
 
 def build_calendar(doc: dict, config: dict, build_time: dt.datetime | None = None,
                    subjects: set[str] | None = None,
-                   name_suffix: str = "") -> tuple[Calendar, int]:
+                   name_suffix: str = "",
+                   section: str | None = None) -> tuple[Calendar, int]:
     """Build a calendar. If `subjects` is given, only those subjects are included
-    (used to emit one feed per subject). `name_suffix` is appended to the
-    calendar's display name so Apple shows distinct names per feed."""
+    (used to emit one feed per subject). `section` overrides the config's section
+    filter (used to emit a feed per section for the on-page A/B chooser).
+    `name_suffix` is appended to the calendar's display name so the client shows
+    distinct names per feed."""
     build_time = build_time or dt.datetime.now(tz=dt.timezone.utc)
-    section = config.get("section", "ALL")
+    section = section if section is not None else config.get("section", "ALL")
     include_untimed = config.get("include_untimed", True)
     namespace = config.get("uid_namespace", "schedule")
 
