@@ -1,0 +1,33 @@
+# Calendar build configuration.
+# Edit these values; the build reads them at run time.
+
+calendar_name: "UC MED Level 2 - 1st Bimonthly"
+
+# Asia/Manila is a fixed UTC+8 with no daylight saving. Do not change unless the
+# schedule is genuinely in another zone.
+timezone: "Asia/Manila"
+
+# Which section's events to publish:
+#   "ALL" -> keep everything (both sections + shared items)
+#   "A"   -> keep Section A events + shared ("ALL") events, drop Section B
+#   "B"   -> keep Section B events + shared ("ALL") events, drop Section A
+section: "B"
+
+# Include untimed items (independent study, reading assignments) as all-day
+# entries. Set to false if you only want fixed-time classes and exams.
+include_untimed: true
+
+# Also emit one feed per subject (schedule-pathology.ics, schedule-micro.ics, ...)
+# so you can subscribe to each and give it its own color in Apple Calendar.
+# The combined schedule.ics is always produced too. Subscribe to EITHER the
+# combined feed OR the per-subject set - not both (they share event IDs).
+emit_per_subject_feeds: true
+
+# Guardrail window. Events outside this range are flagged as warnings so a
+# stray date from a bad extraction can't silently land in your calendar.
+term_start: "2026-08-03"
+term_end: "2026-10-10"
+
+# Namespace used to build stable event UIDs. Keep it constant across rebuilds so
+# subscribers update events in place instead of duplicating them.
+uid_namespace: "uc-med-sched"

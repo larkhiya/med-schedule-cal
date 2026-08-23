@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Schedule",
+  "type": "object",
+  "required": ["meta", "events"],
+  "additionalProperties": false,
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["term", "source_title", "week_blocks"],
+      "additionalProperties": true,
+      "properties": {
+        "term": { "type": "string" },
+        "source_title": { "type": "string" },
+        "week_blocks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["label", "start", "end"],
+            "additionalProperties": false,
+            "properties": {
+              "label": { "type": "string" },
+              "start": { "type": "string", "format": "date" },
+              "end": { "type": "string", "format": "date" }
+            }
+          }
+        },
+        "review_notes": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "events": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/event" }
+    }
+  },
+  "$defs": {
+    "event": {
+      "type": "object",
+      "required": ["subject", "activity", "title", "date", "all_day", "section", "confidence", "source_ref"],
+      "additionalProperties": false,
+      "properties": {
+        "subject": {
+          "type": "string",
+          "enum": ["PATHOLOGY", "PHARMACOLOGY", "MICRO", "PD", "PREVMED", "PSYCHIATRY", "RESEARCH", "OTHER"]
+        },
+        "activity": {
+          "type": "string",
+          "enum": ["Lecture", "Laboratory", "Exam", "CBL", "Independent Study", "Orientation", "PD", "Holiday", "Other"]
+        },
+        "title": { "type": "string", "minLength": 1 },
+        "date": { "type": "string", "format": "date" },
+        "start": { "type": ["string", "null"], "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" },
+        "end": { "type": ["string", "null"], "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" },
+        "all_day": { "type": "boolean" },
+        "lecturer": { "type": "string" },
+        "section": { "type": "string", "enum": ["A", "B", "ALL"] },
+        "notes": { "type": "string" },
+        "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
+        "source_ref": { "type": "string" }
+      }
+    }
+  }
+}
