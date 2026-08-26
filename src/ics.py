@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
-from zoneinfo import ZoneInfo
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo
 
 from icalendar import Calendar, Event, Timezone, TimezoneStandard
 
