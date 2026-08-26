@@ -153,9 +153,14 @@ def main() -> int:
         subject_feeds = build_subject_feeds(config.get("section", "ALL"), "schedule-", "")
         print(f"Emitted {len(subject_feeds)} per-subject feeds.")
 
+    # Hero mascots the subscribe page shuffles through (published under site/img).
+    hero_images = ["img/" + p.name for p in sorted((ROOT / "img").glob("*.png"),
+                                                    key=lambda q: (len(q.stem), q.stem))]
+
     html_str = preview_mod.render(doc, config, report, ics_url, kept, build_time,
                                   subject_feeds=subject_feeds,
-                                  section_data=section_data, base_url=base)
+                                  section_data=section_data, base_url=base,
+                                  hero_images=hero_images)
     preview_mod.write_preview(html_str, str(SITE / "index.html"))
 
     # Calendar view page + its vendored library (kept self-contained so the page
@@ -163,6 +168,10 @@ def main() -> int:
     cal_html = preview_mod.render_calendar(doc, config, section_data, build_time, base_url=base)
     preview_mod.write_preview(cal_html, str(SITE / "calendar.html"))
     copy_vendor()
+    # Hero mascots + self-hosted fonts (same self-contained rationale).
+    copy_tree_files(ROOT / "img", SITE / "img", "img/", exts=(".png",))
+    copy_tree_files(ROOT / "fonts", SITE / "fonts", "fonts/",
+                    exts=(".ttf", ".woff2", ".woff"))
 
     emit_summary(report, kept, ics_url)
     print(f"\nBuilt {kept} events -> site/schedule.ics, site/index.html, site/calendar.html")
@@ -181,6 +190,23 @@ def copy_vendor() -> None:
     for f in src.iterdir():
         if f.is_file():
             shutil.copyfile(f, dst / f.name)
+
+
+def copy_tree_files(src: Path, dst: Path, label: str,
+                    exts: tuple[str, ...] | None = None) -> None:
+    """Copy the top-level files of `src` into `dst` (created if needed). Shallow
+    like copy_vendor (subdirectories such as img/original/ are skipped); an
+    optional lowercased extension allowlist limits what gets published."""
+    if not src.is_dir():
+        print(f"WARNING: {label} not found at {src} - skipping.")
+        return
+    dst.mkdir(parents=True, exist_ok=True)
+    n = 0
+    for f in src.iterdir():
+        if f.is_file() and (exts is None or f.suffix.lower() in exts):
+            shutil.copyfile(f, dst / f.name)
+            n += 1
+    print(f"Copied {n} file(s) into {dst.relative_to(ROOT)}.")
 
 
 if __name__ == "__main__":
