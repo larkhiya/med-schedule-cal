@@ -764,9 +764,12 @@ a { color: inherit; }
   .top h1 { flex-basis: 100%; order: -1; font-size: 22px; }
   .back { font-size: 13px; padding: 6px 11px; }
   .legend { font-size: 11.5px; gap: 5px 10px; margin-bottom: 12px; }
-  /* compact toolbar: Today and Grid/List collapse to icons */
-  .caltoolbar { gap: 8px; }
-  .caltoolbar .today { padding: 8px 11px; gap: 0; }
+  /* compact toolbar: give the month stepper its own centered row so its right
+     arrow can't collide with the view toggle; Today + view sit on the row below. */
+  .caltoolbar { grid-template-columns: 1fr 1fr; column-gap: 8px; row-gap: 10px; }
+  .caltoolbar .monthnav { grid-column: 1 / -1; grid-row: 1; }
+  .caltoolbar .today { grid-row: 2; padding: 8px 11px; gap: 0; }
+  .caltoolbar .viewseg { grid-column: 2; grid-row: 2; }
   .today .tlabel, .segbtn[data-view] .tlabel { display: none; }
   .today .ic, .segbtn[data-view] .ic { display: inline-flex; }
   .segbtn { padding: 8px 12px; font-size: 13.5px; }
