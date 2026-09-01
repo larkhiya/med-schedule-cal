@@ -7,8 +7,10 @@ schedule PDF and produces the JSON; GitHub validates it, builds `schedule.ics`,
 and publishes it to GitHub Pages. Your phone or account subscribes to that URL
 once and auto-refreshes forever.
 
-Nothing runs on your device — all compute happens free in GitHub Actions. You
-only ever edit one file (`data/schedule.json`) from the GitHub app or website.
+Nothing runs on your device — all compute happens free in GitHub Actions.
+Day-to-day you edit the schedule from a **web editor** (`admin.html`) that commits
+the change for you; under the hood it's still one file (`data/schedule.json`),
+which you can also edit directly from the GitHub app or website.
 
 ```
 PDF ──(Claude + extraction prompt)──▶ schedule.json ──(git commit)──▶
@@ -39,7 +41,7 @@ The published site is two pages:
 | `data/schedule.json` | The source of truth. The only file you routinely edit. |
 | `config.yaml` | Calendar name, default section + A/B chooser, term window, timezone. |
 | `schema/schedule.schema.json` | Structural rules for the JSON. |
-| `src/` | Validation, ICS generation, subscribe + calendar pages, build entrypoint. |
+| `src/` | Validation, ICS generation, subscribe + calendar + editor pages, build entrypoint. |
 | `vendor/` | Vendored calendar-view library (Event Calendar, MIT), copied into the site. |
 | `tests/` | Unit tests (run automatically in CI). |
 | `.github/workflows/build.yml` | Validate → build → publish on every push. |
@@ -80,12 +82,44 @@ The published site is two pages:
    schedule — usually within a day, sometimes longer, and not on demand. Either
    way, future updates flow in automatically with no re-subscribing.
 
+## Editing from the web (no code)
+
+Ad-hoc changes — a class moved, a room or lecturer change, an added holiday —
+don't need the PDF or the codebase. Open the **editor** and change them in a form:
+
+`https://<your-username>.github.io/med-schedule-cal/admin.html`
+
+1. **One-time:** create a **fine-grained token** at GitHub → Settings → Developer
+   settings → Fine-grained tokens, scoped to **only this repo** with **Contents:
+   Read and write**. Paste it into the editor once; it's stored only in your
+   browser (never in the page or the repo) and can be revoked anytime.
+2. **Edit:** add / edit / delete / move events in the **Events** tab (dropdowns
+   and date/time pickers, grouped by week). The **Term & settings** tab edits the
+   week blocks, reviewer notes, and calendar settings, and has a *Replace the
+   whole schedule* box for pasting a fresh `schedule.json` (e.g. Claude's output
+   for a new bimonthly).
+3. **Publish:** the editor validates as you go — it won't let you publish an event
+   whose end is before its start — then commits to `main` for you. Actions
+   rebuilds and republishes in ~2 minutes; subscribers refresh on their own, with
+   **no re-subscribing**.
+
+The page is published but not linked from the subscribe page, and is inert
+without your token, so you can use it from your phone. Settings you change there
+are saved to `data/config.local.json`, which the build merges over `config.yaml`.
+
+> **How fast subscribers see it:** publishing is quick, but calendar apps refetch
+> on their own clock — **Apple** on the interval you set (often minutes to
+> hourly), **Google** more slowly (several hours up to about a day, and it can't
+> be forced). That lag is the calendar app's, not this project's — and no
+> alternative hosting changes it.
+
 ## Every new half-semester
 
 1. Open Claude, paste `schedule_extraction_prompt.md`, attach the new PDF.
 2. Claude returns a new `schedule.json` plus a REVIEW FLAGS list. Skim the flags.
-3. In the GitHub app/website, open `data/schedule.json`, replace its contents,
-   and commit to `main`.
+3. Paste it into the editor's **Replace the whole schedule** box (Term & settings
+   tab) and publish — or, in the GitHub app/website, open `data/schedule.json`,
+   replace its contents, and commit to `main`.
 4. Actions rebuilds and republishes in ~2 minutes. Your subscribed calendar
    updates on its next refresh. No re-subscribing needed.
 
@@ -153,6 +187,11 @@ with a colored emoji per subject; that needs a small tweak to `src/ics.py`
   (see **Colors**). `false` publishes only the combined feed(s).
 - `timezone`: `Asia/Manila` (fixed UTC+8, no daylight saving). Leave as-is unless
   your schedule is in a different zone.
+- `data/config.local.json` (optional, written by the web editor): overrides the
+  matching keys above so the documented `config.yaml` is never rewritten from the
+  browser. Delete it to fall back entirely to `config.yaml`. `timezone` and
+  `uid_namespace` are intentionally not web-editable — changing `uid_namespace`
+  would orphan every existing subscription.
 
 ## Run it locally (optional, needs a computer)
 

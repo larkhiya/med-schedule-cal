@@ -73,6 +73,12 @@ def emit_summary(report, kept_count: int, ics_url: str) -> None:
 
 def main() -> int:
     config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    # Optional web-owned settings written by the admin editor. Merged over the
+    # YAML defaults so config.yaml (with its comments) is never rewritten from a
+    # browser; the editor only touches the scalars in preview._ADMIN_CONFIG_KEYS.
+    overrides = ROOT / "data" / "config.local.json"
+    if overrides.exists():
+        config.update(load_json(overrides))
     doc = load_json(DATA)
     schema = load_json(SCHEMA)
 
@@ -167,6 +173,18 @@ def main() -> int:
     # loads fast, same-origin, with no external requests).
     cal_html = preview_mod.render_calendar(doc, config, section_data, build_time, base_url=base)
     preview_mod.write_preview(cal_html, str(SITE / "calendar.html"))
+
+    # Maintainer's editor page: loads the live schedule from GitHub at runtime and
+    # commits edits back (see preview.render_admin). Published but not linked from
+    # the subscribe page, and inert without the maintainer's own token. The repo
+    # slug is baked in from the Actions env when available; locally the page asks
+    # for it once. The schema is published beside it so the editor's dropdowns
+    # stay in lockstep with what CI validates against.
+    repo_slug = os.environ.get("GITHUB_REPOSITORY", "")
+    admin_html = preview_mod.render_admin(config, schema, repo_slug=repo_slug, base_url=base)
+    preview_mod.write_preview(admin_html, str(SITE / "admin.html"))
+    shutil.copyfile(SCHEMA, SITE / "schedule.schema.json")
+
     copy_vendor()
     # Hero mascots + self-hosted fonts (same self-contained rationale).
     copy_tree_files(ROOT / "img", SITE / "img", "img/", exts=(".png",))
@@ -174,7 +192,8 @@ def main() -> int:
                     exts=(".ttf", ".woff2", ".woff"))
 
     emit_summary(report, kept, ics_url)
-    print(f"\nBuilt {kept} events -> site/schedule.ics, site/index.html, site/calendar.html")
+    print(f"\nBuilt {kept} events -> site/schedule.ics, site/index.html, "
+          f"site/calendar.html, site/admin.html")
     return 0
 
 
