@@ -93,15 +93,23 @@ don't need the PDF or the codebase. Open the **editor** and change them in a for
    settings → Fine-grained tokens, scoped to **only this repo** with **Contents:
    Read and write**. Paste it into the editor once; it's stored only in your
    browser (never in the page or the repo) and can be revoked anytime.
-2. **Edit:** add / edit / delete / move events in the **Events** tab (dropdowns
-   and date/time pickers, grouped by week). The **Term & settings** tab edits the
-   week blocks, reviewer notes, and calendar settings, and has a *Replace the
-   whole schedule* box for pasting a fresh `schedule.json` (e.g. Claude's output
-   for a new bimonthly).
-3. **Publish:** the editor validates as you go — it won't let you publish an event
-   whose end is before its start — then commits to `main` for you. Actions
-   rebuilds and republishes in ~2 minutes; subscribers refresh on their own, with
-   **no re-subscribing**.
+2. **Edit:** the **Events** tab is the same month/list calendar the public site
+   shows — **tap any class to edit it**, or **tap an empty day to add one**
+   (a form with dropdowns and date/time pickers; the A/B/All filter and Grid/List
+   toggle match the subscribe view). The **Term & settings** tab edits the week
+   blocks, reviewer notes, and calendar settings.
+3. **Manage schedules:** the **Schedules** tab keeps a library of schedules, with
+   **one live at a time** — the live one is what the public feeds serve, so the
+   feed URLs never change. Drop or pick a `schedule.json` (e.g. Claude's output
+   for a new bimonthly) to add it to the library; **Set active** then Publish
+   makes it the live calendar. Each schedule carries a *source* label, so you can
+   multi-select and delete them or delete a whole source group at once. The
+   archive lives under `library/` (outside `data/`), so managing it never rebuilds
+   or disturbs the live feeds.
+4. **Publish:** the editor validates as you go — it won't let you publish an event
+   whose end is before its start — then commits `data/schedule.json` to `main` for
+   you. Actions rebuilds and republishes in ~2 minutes; subscribers refresh on
+   their own, with **no re-subscribing**.
 
 The page is published but not linked from the subscribe page, and is inert
 without your token, so you can use it from your phone. Settings you change there
@@ -117,9 +125,9 @@ are saved to `data/config.local.json`, which the build merges over `config.yaml`
 
 1. Open Claude, paste `schedule_extraction_prompt.md`, attach the new PDF.
 2. Claude returns a new `schedule.json` plus a REVIEW FLAGS list. Skim the flags.
-3. Paste it into the editor's **Replace the whole schedule** box (Term & settings
-   tab) and publish — or, in the GitHub app/website, open `data/schedule.json`,
-   replace its contents, and commit to `main`.
+3. In the editor's **Schedules** tab, drop or choose the file to add it to the
+   library, tap **Set active**, and Publish — or, in the GitHub app/website, open
+   `data/schedule.json`, replace its contents, and commit to `main`.
 4. Actions rebuilds and republishes in ~2 minutes. Your subscribed calendar
    updates on its next refresh. No re-subscribing needed.
 

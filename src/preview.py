@@ -33,6 +33,7 @@ SUBJECT_HUES = {
     "PREVMED": "#F0FF82",
     "PSYCHIATRY": "#99F6FF",
     "RESEARCH": "#FBFF85",
+    "LEGALMED": "#C9B6FF",
     "OTHER": "#FF9B87",
 }
 
@@ -587,6 +588,252 @@ def _calendar_events(doc: dict, config: dict) -> list[dict]:
     return out
 
 
+# --------------------------------------------------------------------------- #
+#  Shared calendar view (used by BOTH calendar.html and admin.html)
+#
+#  One component so the public calendar and the editor look and behave
+#  identically. The CSS, the toolbar markup, and the JS engine below are injected
+#  into each page; each page supplies only what differs (where events come from,
+#  what a click does, and the section/term configuration).
+# --------------------------------------------------------------------------- #
+
+_CAL_VIEW_CSS = """
+/* subject legend */
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0 0 16px; font-size: 12.5px; color: var(--ink-55); }
+.legend .lg { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
+
+/* segmented controls + pills, styled as highlighter chips (selected = yellow) */
+.seg { display: inline-flex; border: 1.6px solid var(--ink-40); border-radius: 11px; overflow: hidden; }
+.segbtn { appearance: none; border: 0; background: var(--paper); color: var(--ink);
+  font: inherit; font-family: var(--sans); font-weight: 600; padding: 8px 15px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px; }
+.segbtn + .segbtn { border-left: 1.6px solid var(--ink-40); }
+.segbtn:hover { background: var(--hi-soft); }
+.segbtn.on { background: var(--hi); color: var(--ink); }
+
+/* custom calendar toolbar (we hide the library's and render our own so the
+   list view can page by week inside a month) */
+.ec-toolbar { display: none; }
+.caltoolbar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px 10px; margin: 0 0 14px; }
+.caltoolbar .today { justify-self: start; display: inline-flex; align-items: center; gap: 7px;
+  appearance: none; border: 1.6px solid var(--ink-40); background: var(--paper);
+  color: var(--ink); font: inherit; font-family: var(--sans); font-weight: 600; padding: 8px 14px; border-radius: 10px; cursor: pointer; }
+.caltoolbar .today:hover { background: var(--hi); border-color: var(--ink); }
+.monthnav { justify-self: center; display: inline-flex; align-items: center; gap: 4px; }
+.monthnav .mlabel { min-width: 148px; text-align: center; font-family: var(--serif); font-weight: 400; font-size: 19px; }
+.navbtn { appearance: none; border: 1.6px solid var(--ink-40); background: var(--paper); color: var(--ink);
+  width: 36px; height: 36px; border-radius: 10px; font-size: 19px; line-height: 1; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; }
+.navbtn:hover:not(:disabled) { background: var(--hi); border-color: var(--ink); }
+.navbtn:disabled { opacity: .35; cursor: default; }
+.viewseg { justify-self: end; }
+.today .ic, .segbtn[data-view] .ic { display: none; align-items: center; }
+.today .ic svg, .segbtn[data-view] .ic svg { display: block; }
+.weekbar { display: flex; align-items: center; flex-wrap: wrap; justify-content: center; gap: 8px 12px; margin: 2px 0 14px; }
+.weekbar[hidden] { display: none; }
+.weekbar .wlab { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-55); }
+.wpills { display: flex; flex-wrap: wrap; gap: 6px; }
+.wpill { appearance: none; border: 1.6px solid var(--ink-40); background: var(--paper); color: var(--ink);
+  min-width: 34px; height: 34px; padding: 0 11px; border-radius: 999px; font: inherit; font-family: var(--sans); font-weight: 600; cursor: pointer; }
+.wpill:hover { background: var(--hi-soft); }
+.wpill.on { background: var(--hi); color: var(--ink); border-color: var(--ink); }
+.wcap { font-size: 13px; color: var(--ink-55); font-weight: 600; }
+
+/* Event Calendar theming (mapped to the palette) */
+.ec {
+  --ec-font-family: var(--sans);
+  --ec-bg-color: var(--paper);
+  --ec-border-color: var(--ink-12);
+  --ec-text-color: var(--ink);
+  --ec-day-bg-color: var(--paper);
+  --ec-today-bg-color: var(--hi-soft);
+  --ec-highlight-color: rgba(203,225,236,.55);
+  --ec-popup-bg-color: var(--paper);
+  --ec-button-bg-color: var(--paper);
+  --ec-button-border-color: var(--ink-40);
+  --ec-button-text-color: var(--ink);
+  --ec-button-active-bg-color: var(--hi);
+  --ec-button-active-border-color: var(--ink);
+  --ec-button-active-text-color: var(--ink);
+}
+.ec { border-radius: 14px; }
+.ec-day-head, .ec-toolbar { font-weight: 600; }
+/* light pastel fills need a hairline so they read against white cells */
+.ec-event { border: 0; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); border-radius: 6px; cursor: pointer; }
+.ec-day-grid .ec-event { margin-inline: 3px; padding: 2px 4px; }
+
+#cal[hidden] + .noscript, .noscript { display: none; }
+.noscript.show { display: block; background: var(--hi-soft); border: 1.6px solid var(--ink-40);
+  border-radius: 10px; padding: 14px 16px; color: var(--ink); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .segbtn, .navbtn, .today, .wpill { transition: background .16s ease, border-color .16s ease, color .16s ease; }
+}
+@media (max-width: 560px) {
+  .legend { font-size: 11.5px; gap: 5px 10px; margin-bottom: 12px; }
+  /* compact toolbar: give the month stepper its own centered row so its right
+     arrow can't collide with the view toggle; Today + view sit on the row below. */
+  .caltoolbar { grid-template-columns: 1fr 1fr; column-gap: 8px; row-gap: 10px; }
+  .caltoolbar .monthnav { grid-column: 1 / -1; grid-row: 1; }
+  .caltoolbar .today { grid-row: 2; padding: 8px 11px; gap: 0; }
+  .caltoolbar .viewseg { grid-column: 2; grid-row: 2; }
+  .today .tlabel, .segbtn[data-view] .tlabel { display: none; }
+  .today .ic, .segbtn[data-view] .ic { display: inline-flex; }
+  .segbtn { padding: 8px 12px; font-size: 13.5px; }
+  .segbtn[data-view] { padding: 8px 11px; }
+  .navbtn { width: 34px; height: 34px; font-size: 18px; }
+  .monthnav .mlabel { min-width: 112px; font-size: 16px; }
+  .weekbar .wlab { display: none; }
+  .wpill { min-width: 30px; height: 30px; padding: 0 9px; font-size: 13px; }
+  .wcap { flex-basis: 100%; text-align: center; }
+}
+"""
+
+# Toolbar + week pager + calendar mount. Each page supplies its own <noscript>
+# fallback and (for calendar.html) a detail overlay after this block.
+_CAL_VIEW_HTML = """<div class="caltoolbar">
+    <button id="btnToday" class="today" type="button" aria-label="Jump to today">
+      <span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9.5h18"/><path d="M8 2.5v4M16 2.5v4"/><circle cx="12" cy="15" r="1.7" fill="currentColor" stroke="none"/></svg></span><span class="tlabel">Today</span></button>
+    <div class="monthnav">
+      <button id="mPrev" class="navbtn" type="button" aria-label="Previous month">&lsaquo;</button>
+      <span id="mLabel" class="mlabel" aria-live="polite"></span>
+      <button id="mNext" class="navbtn" type="button" aria-label="Next month">&rsaquo;</button>
+    </div>
+    <div class="seg viewseg" role="group" aria-label="Calendar view">
+      <button class="segbtn" type="button" data-view="grid" aria-pressed="false" aria-label="Grid view"><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg></span><span class="tlabel">Grid</span></button>
+      <button class="segbtn" type="button" data-view="list" aria-pressed="false" aria-label="List view"><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="4" cy="18" r="1.3" fill="currentColor" stroke="none"/></svg></span><span class="tlabel">List</span></button>
+    </div>
+  </div>
+  <div id="weekbar" class="weekbar" role="group" aria-label="Week of the month" hidden>
+    <span class="wlab">Week</span>
+    <div id="wpills" class="wpills"></div>
+    <span id="wcap" class="wcap" aria-live="polite"></span>
+  </div>
+  <div id="cal"></div>"""
+
+# The calendar engine, injected inside each page's IIFE. Defines one function.
+# cfg: { allEvents()->[], onEventClick(ev), onDateClick(dateStr)|null,
+#        termStart, termEndExcl (exclusive) | null (unbounded nav), focusDate|null,
+#        initialView "grid"|"list"|null, initialSection "A"|"B"|"ALL",
+#        persistSection bool, sectionKey, emptyGridText, emptyListText }
+# A section of "ALL" shows every event; "A"/"B" shows that section plus shared.
+# Returns { refresh(), setSection(s), getSection(), goto(dateStr) }.
+_CAL_ENGINE_JS = """
+  function makeCalendarView(cfg) {
+    function pad(n) { return (n < 10 ? "0" : "") + n; }
+    function ymd(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+    function parseYmd(s) { var p = s.split("-"); return new Date(+p[0], +p[1] - 1, +p[2]); }
+    function addDays(d, n) { var x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() + n); return x; }
+    function firstOfMonth(d) { return new Date(d.getFullYear(), d.getMonth(), 1); }
+    function sameMonth(a, b) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth(); }
+    function startOfWeekMon(d) { var x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; }
+    var MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+    var MON_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    function fmtMonth(d) { return MONTHS[d.getMonth()] + " " + d.getFullYear(); }
+    function fmtDay(d) { return MON_ABBR[d.getMonth()] + " " + d.getDate(); }
+
+    var section = cfg.initialSection || "ALL";
+    function feed() { return cfg.allEvents().filter(function (ev) {
+      var s = ev.extendedProps.sec; return section === "ALL" ? true : (s === "ALL" || s === section); }); }
+
+    var TERM_START = cfg.termStart || null, TERM_END_EXCL = cfg.termEndExcl || null;
+    var tStart = TERM_START ? parseYmd(TERM_START) : null;
+    var tEndExcl = TERM_END_EXCL ? parseYmd(TERM_END_EXCL) : null;
+    var monthMin = tStart ? firstOfMonth(tStart) : null;
+    var monthMax = tEndExcl ? firstOfMonth(addDays(tEndExcl, -1)) : null;
+    function clampMonth(m) { if (monthMin && m < monthMin) return new Date(monthMin);
+      if (monthMax && m > monthMax) return new Date(monthMax); return m; }
+    function safeDate(d) { if (tStart && d < tStart) return tStart;
+      if (tEndExcl && d >= tEndExcl) return addDays(tEndExcl, -1); return d; }
+    function weekInTerm(mon) { if (!tStart || !tEndExcl) return true; return mon < tEndExcl && addDays(mon, 7) > tStart; }
+    function weeksOfMonth(m) {
+      var mon = startOfWeekMon(firstOfMonth(m));
+      if (mon < firstOfMonth(m)) mon = addDays(mon, 7);
+      var out = []; while (sameMonth(mon, m)) { if (weekInTerm(mon)) out.push(mon); mon = addDays(mon, 7); }
+      return out.length ? out : [startOfWeekMon(firstOfMonth(m))];
+    }
+    function gridDate(m) { var d = firstOfMonth(m); return (tStart && d < tStart && sameMonth(d, tStart)) ? tStart : d; }
+
+    var now = new Date();
+    var inTerm = tStart && tEndExcl && now >= tStart && now < tEndExcl;
+    var focus = cfg.focusDate ? parseYmd(cfg.focusDate) : (inTerm ? now : (tStart || now));
+    focus = safeDate(focus);
+    var curMonth = firstOfMonth(focus);
+    var weeks = weeksOfMonth(curMonth);
+    var weekIdx = 0;
+    for (var wi = 0; wi < weeks.length; wi++) { if (focus >= weeks[wi] && focus < addDays(weeks[wi], 7)) { weekIdx = wi; break; } }
+    var view = cfg.initialView || (window.matchMedia("(max-width: 640px)").matches ? "list" : "grid");
+    var emptyGrid = cfg.emptyGridText || "No events this month";
+    var emptyList = cfg.emptyListText || "No events this week";
+
+    var opts = {
+      view: view === "list" ? "listWeek" : "dayGridMonth",
+      date: ymd(safeDate(view === "list" ? weeks[weekIdx] : gridDate(curMonth))),
+      firstDay: 1, height: "auto", dayMaxEvents: true,
+      eventTimeFormat: { hour: "2-digit", minute: "2-digit", hour12: false },
+      headerToolbar: { start: "", center: "", end: "" },
+      noEventsContent: view === "list" ? emptyList : emptyGrid,
+      events: feed(),
+      eventClick: function (info) { cfg.onEventClick(info.event); }
+    };
+    if (cfg.onDateClick) opts.dateClick = function (info) { cfg.onDateClick((info.dateStr || "").slice(0, 10)); };
+    if (tStart && tEndExcl) opts.validRange = { start: TERM_START, end: TERM_END_EXCL };
+
+    var ec = EventCalendar.create(document.getElementById("cal"), opts);
+
+    var elToday = document.getElementById("btnToday"), elPrev = document.getElementById("mPrev"),
+        elNext = document.getElementById("mNext"), elLabel = document.getElementById("mLabel"),
+        elWeekbar = document.getElementById("weekbar"), elPills = document.getElementById("wpills"),
+        elCap = document.getElementById("wcap");
+
+    function renderMonth() { elLabel.textContent = fmtMonth(curMonth);
+      elPrev.disabled = !!monthMin && !(curMonth > monthMin);
+      elNext.disabled = !!monthMax && !(curMonth < monthMax); }
+    function renderWeeks() { elPills.innerHTML = "";
+      weeks.forEach(function (mon, i) { var b = document.createElement("button"); b.type = "button";
+        b.className = "wpill" + (i === weekIdx ? " on" : ""); b.textContent = String(i + 1);
+        b.setAttribute("aria-label", "Week of " + fmtDay(mon)); b.setAttribute("aria-pressed", i === weekIdx ? "true" : "false");
+        b.addEventListener("click", function () { gotoWeek(i); }); elPills.appendChild(b); });
+      var mon = weeks[weekIdx]; elCap.textContent = fmtDay(mon) + " \\u2013 " + fmtDay(addDays(mon, 6)); }
+    function showAt() { ec.setOption("date", ymd(safeDate(view === "list" ? weeks[weekIdx] : gridDate(curMonth)))); }
+    function gotoWeek(i) { weekIdx = i; renderWeeks(); showAt(); }
+    function gotoMonth(delta) { var m = clampMonth(new Date(curMonth.getFullYear(), curMonth.getMonth() + delta, 1));
+      if (sameMonth(m, curMonth)) return; curMonth = m; weeks = weeksOfMonth(curMonth); weekIdx = 0;
+      renderMonth(); renderWeeks(); showAt(); }
+    function gotoDate(dateStr) { var d = safeDate(parseYmd(dateStr)); curMonth = firstOfMonth(d);
+      weeks = weeksOfMonth(curMonth); weekIdx = 0;
+      for (var i = 0; i < weeks.length; i++) { if (d >= weeks[i] && d < addDays(weeks[i], 7)) { weekIdx = i; break; } }
+      renderMonth(); renderWeeks(); showAt(); }
+    function goToday() { gotoDate(ymd(new Date())); }
+    function markViewButtons() { document.querySelectorAll(".segbtn[data-view]").forEach(function (b) {
+      var on = b.getAttribute("data-view") === view; b.classList.toggle("on", on); b.setAttribute("aria-pressed", on ? "true" : "false"); }); }
+    function applyView() { markViewButtons();
+      if (view === "list") { ec.setOption("noEventsContent", emptyList); ec.setOption("view", "listWeek"); elWeekbar.hidden = false; }
+      else { ec.setOption("noEventsContent", emptyGrid); ec.setOption("view", "dayGridMonth"); elWeekbar.hidden = true; }
+      showAt(); }
+    elPrev.addEventListener("click", function () { gotoMonth(-1); });
+    elNext.addEventListener("click", function () { gotoMonth(1); });
+    elToday.addEventListener("click", goToday);
+    document.querySelectorAll(".segbtn[data-view]").forEach(function (b) {
+      b.addEventListener("click", function () { var v = b.getAttribute("data-view"); if (v !== view) { view = v; applyView(); } }); });
+
+    function markButtons() { document.querySelectorAll(".segbtn[data-sec]").forEach(function (b) {
+      var on = b.getAttribute("data-sec") === section; b.classList.toggle("on", on); b.setAttribute("aria-pressed", on ? "true" : "false"); }); }
+    function setSection(s) { section = s; ec.setOption("events", feed()); markButtons();
+      if (cfg.persistSection) { try { localStorage.setItem(cfg.sectionKey, s); } catch (e) {}
+        try { var u = new URL(location); u.searchParams.set("section", s); history.replaceState(null, "", u); } catch (e) {} } }
+    document.querySelectorAll(".segbtn[data-sec]").forEach(function (b) {
+      b.addEventListener("click", function () { setSection(b.getAttribute("data-sec")); }); });
+
+    renderMonth(); renderWeeks(); markViewButtons(); markButtons(); elWeekbar.hidden = (view !== "list");
+    return { refresh: function () { ec.setOption("events", feed()); }, setSection: setSection,
+      getSection: function () { return section; }, goto: gotoDate };
+  }
+"""
+
+
 def render_calendar(doc: dict, config: dict, section_data: dict | None,
                     build_time: dt.datetime, base_url: str = "") -> str:
     cal_name = config.get("calendar_name", "Schedule")
@@ -620,6 +867,9 @@ def render_calendar(doc: dict, config: dict, section_data: dict | None,
         )
 
     page = _CAL_TEMPLATE
+    page = page.replace("__CAL_VIEW_CSS__", _CAL_VIEW_CSS)
+    page = page.replace("__CAL_VIEW_HTML__", _CAL_VIEW_HTML)
+    page = page.replace("__CAL_ENGINE_JS__", _CAL_ENGINE_JS)
     page = page.replace("__FONT_FACE__", _FONT_FACE)
     page = page.replace("__PALETTE__", _PALETTE)
     page = page.replace("__TITLE__", _esc(f"{cal_name} · Calendar"))
@@ -671,79 +921,7 @@ a { color: inherit; }
   text-decoration: none; }
 .lark:hover { text-decoration: underline; }
 .calfoot { margin-top: 20px; text-align: right; }
-.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0 0 16px; font-size: 12.5px; color: var(--ink-55); }
-.legend .lg { display: inline-flex; align-items: center; gap: 6px; }
-.legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
-
-/* segmented controls + pills, styled as highlighter chips (selected = yellow) */
-.seg { display: inline-flex; border: 1.6px solid var(--ink-40); border-radius: 11px; overflow: hidden; }
-.segbtn { appearance: none; border: 0; background: var(--paper); color: var(--ink);
-  font: inherit; font-family: var(--sans); font-weight: 600; padding: 8px 15px; cursor: pointer;
-  display: inline-flex; align-items: center; gap: 6px; }
-.segbtn + .segbtn { border-left: 1.6px solid var(--ink-40); }
-.segbtn:hover { background: var(--hi-soft); }
-.segbtn.on { background: var(--hi); color: var(--ink); }
-
-/* custom calendar toolbar (we hide the library's and render our own so the
-   list view can page by week inside a month) */
-.ec-toolbar { display: none; }
-/* three columns so the month stepper stays visually centered regardless of the
-   side controls' widths */
-.caltoolbar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
-  gap: 8px 10px; margin: 0 0 14px; }
-.caltoolbar .today { justify-self: start; display: inline-flex; align-items: center; gap: 7px;
-  appearance: none; border: 1.6px solid var(--ink-40); background: var(--paper);
-  color: var(--ink); font: inherit; font-family: var(--sans); font-weight: 600; padding: 8px 14px; border-radius: 10px; cursor: pointer; }
-.caltoolbar .today:hover { background: var(--hi); border-color: var(--ink); }
-.monthnav { justify-self: center; display: inline-flex; align-items: center; gap: 4px; }
-.monthnav .mlabel { min-width: 148px; text-align: center; font-family: var(--serif); font-weight: 400; font-size: 19px; }
-.navbtn { appearance: none; border: 1.6px solid var(--ink-40); background: var(--paper); color: var(--ink);
-  width: 36px; height: 36px; border-radius: 10px; font-size: 19px; line-height: 1; cursor: pointer;
-  display: inline-flex; align-items: center; justify-content: center; }
-.navbtn:hover:not(:disabled) { background: var(--hi); border-color: var(--ink); }
-.navbtn:disabled { opacity: .35; cursor: default; }
-.viewseg { justify-self: end; }
-/* Today / Grid / List carry both an icon and a text label; the label shows on
-   wide screens, the icon takes over on narrow ones (see the mobile query). */
-.today .ic, .segbtn[data-view] .ic { display: none; align-items: center; }
-.today .ic svg, .segbtn[data-view] .ic svg { display: block; }
-.weekbar { display: flex; align-items: center; flex-wrap: wrap; justify-content: center;
-  gap: 8px 12px; margin: 2px 0 14px; }
-.weekbar[hidden] { display: none; }
-.weekbar .wlab { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-55); }
-.wpills { display: flex; flex-wrap: wrap; gap: 6px; }
-.wpill { appearance: none; border: 1.6px solid var(--ink-40); background: var(--paper); color: var(--ink);
-  min-width: 34px; height: 34px; padding: 0 11px; border-radius: 999px; font: inherit; font-family: var(--sans); font-weight: 600; cursor: pointer; }
-.wpill:hover { background: var(--hi-soft); }
-.wpill.on { background: var(--hi); color: var(--ink); border-color: var(--ink); }
-.wcap { font-size: 13px; color: var(--ink-55); font-weight: 600; }
-
-/* Event Calendar theming (mapped to the palette) */
-.ec {
-  --ec-font-family: var(--sans);
-  --ec-bg-color: var(--paper);
-  --ec-border-color: var(--ink-12);
-  --ec-text-color: var(--ink);
-  --ec-day-bg-color: var(--paper);
-  --ec-today-bg-color: var(--hi-soft);
-  --ec-highlight-color: rgba(203,225,236,.55);
-  --ec-popup-bg-color: var(--paper);
-  --ec-button-bg-color: var(--paper);
-  --ec-button-border-color: var(--ink-40);
-  --ec-button-text-color: var(--ink);
-  --ec-button-active-bg-color: var(--hi);
-  --ec-button-active-border-color: var(--ink);
-  --ec-button-active-text-color: var(--ink);
-}
-.ec { border-radius: 14px; }
-.ec-day-head, .ec-toolbar { font-weight: 600; }
-/* light pastel fills need a hairline so they read against white cells */
-.ec-event { border: 0; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); border-radius: 6px; }
-.ec-day-grid .ec-event { margin-inline: 3px; padding: 2px 4px; }
-
-#cal[hidden] + .noscript, .noscript { display: none; }
-.noscript.show { display: block; background: var(--hi-soft); border: 1.6px solid var(--ink-40);
-  border-radius: 10px; padding: 14px 16px; color: var(--ink); }
+__CAL_VIEW_CSS__
 
 /* detail overlay */
 .ov { position: fixed; inset: 0; background: rgba(28,27,25,.42);
@@ -762,7 +940,7 @@ a { color: inherit; }
 .d-row span { color: var(--ink-55); }
 
 @media (prefers-reduced-motion: no-preference) {
-  .segbtn, .navbtn, .today, .wpill, .back { transition: background .16s ease, border-color .16s ease, color .16s ease; }
+  .back { transition: background .16s ease, border-color .16s ease, color .16s ease; }
 }
 @media (max-width: 560px) {
   .frame { padding: 14px; }
@@ -770,23 +948,6 @@ a { color: inherit; }
   .top { gap: 8px 10px; padding-bottom: 12px; margin-bottom: 14px; }
   .top h1 { flex-basis: 100%; order: -1; font-size: 22px; }
   .back { font-size: 13px; padding: 6px 11px; }
-  .legend { font-size: 11.5px; gap: 5px 10px; margin-bottom: 12px; }
-  /* compact toolbar: give the month stepper its own centered row so its right
-     arrow can't collide with the view toggle; Today + view sit on the row below. */
-  .caltoolbar { grid-template-columns: 1fr 1fr; column-gap: 8px; row-gap: 10px; }
-  .caltoolbar .monthnav { grid-column: 1 / -1; grid-row: 1; }
-  .caltoolbar .today { grid-row: 2; padding: 8px 11px; gap: 0; }
-  .caltoolbar .viewseg { grid-column: 2; grid-row: 2; }
-  .today .tlabel, .segbtn[data-view] .tlabel { display: none; }
-  .today .ic, .segbtn[data-view] .ic { display: inline-flex; }
-  .segbtn { padding: 8px 12px; font-size: 13.5px; }
-  .segbtn[data-view] { padding: 8px 11px; }
-  .navbtn { width: 34px; height: 34px; font-size: 18px; }
-  .monthnav .mlabel { min-width: 112px; font-size: 16px; }
-  /* week pager: drop the label, shrink the pills */
-  .weekbar .wlab { display: none; }
-  .wpill { min-width: 30px; height: 30px; padding: 0 9px; font-size: 13px; }
-  .wcap { flex-basis: 100%; text-align: center; }
   .calfoot { text-align: center; }
 }
 </style>
@@ -800,25 +961,7 @@ a { color: inherit; }
     __SWITCH__
   </div>
   <div class="legend">__LEGEND__</div>
-  <div class="caltoolbar">
-    <button id="btnToday" class="today" type="button" aria-label="Jump to today">
-      <span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9.5h18"/><path d="M8 2.5v4M16 2.5v4"/><circle cx="12" cy="15" r="1.7" fill="currentColor" stroke="none"/></svg></span><span class="tlabel">Today</span></button>
-    <div class="monthnav">
-      <button id="mPrev" class="navbtn" type="button" aria-label="Previous month">&lsaquo;</button>
-      <span id="mLabel" class="mlabel" aria-live="polite"></span>
-      <button id="mNext" class="navbtn" type="button" aria-label="Next month">&rsaquo;</button>
-    </div>
-    <div class="seg viewseg" role="group" aria-label="Calendar view">
-      <button class="segbtn" type="button" data-view="grid" aria-pressed="false" aria-label="Grid view"><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg></span><span class="tlabel">Grid</span></button>
-      <button class="segbtn" type="button" data-view="list" aria-pressed="false" aria-label="List view"><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="4" cy="18" r="1.3" fill="currentColor" stroke="none"/></svg></span><span class="tlabel">List</span></button>
-    </div>
-  </div>
-  <div id="weekbar" class="weekbar" role="group" aria-label="Week of the month" hidden>
-    <span class="wlab">Week</span>
-    <div id="wpills" class="wpills"></div>
-    <span id="wcap" class="wcap" aria-live="polite"></span>
-  </div>
-  <div id="cal"></div>
+  __CAL_VIEW_HTML__
   <div class="noscript">This calendar needs JavaScript. You can still subscribe or read
     the schedule from the <a href="index.html">subscribe page</a>.</div>
   <div id="ov" class="ov" hidden><div id="ovcard" class="ovcard"></div></div>
@@ -839,192 +982,16 @@ a { color: inherit; }
     try { var s = localStorage.getItem(KEY); if (s === "A" || s === "B") return s; } catch (e) {}
     return DEFAULT;
   }
-  var section = pickSection();
-  function feed() {
-    return EVENTS.filter(function (ev) {
-      var s = ev.extendedProps.sec; return s === "ALL" || s === section;
-    });
-  }
+  __CAL_ENGINE_JS__
 
-  // ---------- date helpers (events are wall-clock; no timezone math) ----------
-  function pad(n) { return (n < 10 ? "0" : "") + n; }
-  function ymd(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
-  function parseYmd(s) { var p = s.split("-"); return new Date(+p[0], +p[1] - 1, +p[2]); }
-  function addDays(d, n) { var x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() + n); return x; }
-  function firstOfMonth(d) { return new Date(d.getFullYear(), d.getMonth(), 1); }
-  function sameMonth(a, b) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth(); }
-  function startOfWeekMon(d) {
-    var x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-    x.setDate(x.getDate() - ((x.getDay() + 6) % 7));   // back up to Monday
-    return x;
-  }
-  var MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-  var MON_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  function fmtMonth(d) { return MONTHS[d.getMonth()] + " " + d.getFullYear(); }
-  function fmtDay(d) { return MON_ABBR[d.getMonth()] + " " + d.getDate(); }
-
-  // ---------- term bounds (validRange end is exclusive) ----------
-  var tStart = TERM_START ? parseYmd(TERM_START) : null;
-  var tEndExcl = TERM_END_EXCL ? parseYmd(TERM_END_EXCL) : null;
-  var monthMin = tStart ? firstOfMonth(tStart) : null;
-  var monthMax = tEndExcl ? firstOfMonth(addDays(tEndExcl, -1)) : null;
-  function clampMonth(m) {
-    if (monthMin && m < monthMin) return new Date(monthMin);
-    if (monthMax && m > monthMax) return new Date(monthMax);
-    return m;
-  }
-  function safeDate(d) {   // keep any navigation date inside validRange
-    if (tStart && d < tStart) return tStart;
-    if (tEndExcl && d >= tEndExcl) return addDays(tEndExcl, -1);
-    return d;
-  }
-  function weekInTerm(mon) {              // week [mon, mon+7) overlaps the term
-    if (!tStart || !tEndExcl) return true;
-    return mon < tEndExcl && addDays(mon, 7) > tStart;
-  }
-  // Mondays whose date lands in month m (each week has one home month, so no week
-  // is shown under two months), limited to weeks that overlap the term.
-  function weeksOfMonth(m) {
-    var mon = startOfWeekMon(firstOfMonth(m));
-    if (mon < firstOfMonth(m)) mon = addDays(mon, 7);   // drop the week leaking in from the prev month
-    var out = [];
-    while (sameMonth(mon, m)) { if (weekInTerm(mon)) out.push(mon); mon = addDays(mon, 7); }
-    return out.length ? out : [startOfWeekMon(firstOfMonth(m))];
-  }
-  function gridDate(m) {   // a day inside month m the grid can safely open on
-    var d = firstOfMonth(m);
-    return (tStart && d < tStart && sameMonth(d, tStart)) ? tStart : d;
-  }
-
-  // ---------- nav state: one focused month drives both views ----------
-  var now = new Date();
-  var inTerm = tStart && tEndExcl && now >= tStart && now < tEndExcl;
-  var focus = inTerm ? now : (tStart || now);
-  var curMonth = firstOfMonth(focus);
-  var weeks = weeksOfMonth(curMonth);
-  var weekIdx = 0;
-  for (var wi = 0; wi < weeks.length; wi++) {
-    if (focus >= weeks[wi] && focus < addDays(weeks[wi], 7)) { weekIdx = wi; break; }
-  }
-  var view = window.matchMedia("(max-width: 640px)").matches ? "list" : "grid";
-
-  var opts = {
-    view: view === "list" ? "listWeek" : "dayGridMonth",
-    date: ymd(safeDate(view === "list" ? weeks[weekIdx] : gridDate(curMonth))),
-    firstDay: 1,
-    height: "auto",
-    dayMaxEvents: true,
-    eventTimeFormat: { hour: "2-digit", minute: "2-digit", hour12: false },
-    headerToolbar: { start: "", center: "", end: "" },   // hidden; we render our own below
-    noEventsContent: view === "list" ? "No sessions this week" : "No sessions this month",
-    events: feed(),
-    eventClick: function (info) { showDetail(info.event); }
-  };
-  if (tStart && tEndExcl) { opts.validRange = { start: TERM_START, end: TERM_END_EXCL }; }
-
-  var ec = EventCalendar.create(document.getElementById("cal"), opts);
-
-  // ---------- custom toolbar: month stepper + week pager ----------
-  var elToday = document.getElementById("btnToday");
-  var elPrev = document.getElementById("mPrev");
-  var elNext = document.getElementById("mNext");
-  var elLabel = document.getElementById("mLabel");
-  var elWeekbar = document.getElementById("weekbar");
-  var elPills = document.getElementById("wpills");
-  var elCap = document.getElementById("wcap");
-
-  function renderMonth() {
-    elLabel.textContent = fmtMonth(curMonth);
-    elPrev.disabled = !!monthMin && !(curMonth > monthMin);
-    elNext.disabled = !!monthMax && !(curMonth < monthMax);
-  }
-  function renderWeeks() {
-    elPills.innerHTML = "";
-    weeks.forEach(function (mon, i) {
-      var b = document.createElement("button");
-      b.type = "button";
-      b.className = "wpill" + (i === weekIdx ? " on" : "");
-      b.textContent = String(i + 1);
-      b.setAttribute("aria-label", "Week of " + fmtDay(mon));
-      b.setAttribute("aria-pressed", i === weekIdx ? "true" : "false");
-      b.addEventListener("click", function () { gotoWeek(i); });
-      elPills.appendChild(b);
-    });
-    var mon = weeks[weekIdx];
-    elCap.textContent = fmtDay(mon) + " – " + fmtDay(addDays(mon, 6));
-  }
-  function showAt() {   // point the calendar at the current month/week for the active view
-    ec.setOption("date", ymd(safeDate(view === "list" ? weeks[weekIdx] : gridDate(curMonth))));
-  }
-  function gotoWeek(i) { weekIdx = i; renderWeeks(); showAt(); }
-  function gotoMonth(delta) {
-    var m = clampMonth(new Date(curMonth.getFullYear(), curMonth.getMonth() + delta, 1));
-    if (sameMonth(m, curMonth)) return;
-    curMonth = m; weeks = weeksOfMonth(curMonth); weekIdx = 0;
-    renderMonth(); renderWeeks(); showAt();
-  }
-  function goToday() {
-    var t = safeDate(now);
-    curMonth = firstOfMonth(t); weeks = weeksOfMonth(curMonth); weekIdx = 0;
-    for (var i = 0; i < weeks.length; i++) { if (t >= weeks[i] && t < addDays(weeks[i], 7)) { weekIdx = i; break; } }
-    renderMonth(); renderWeeks(); showAt();
-  }
-  function markViewButtons() {
-    document.querySelectorAll(".segbtn[data-view]").forEach(function (b) {
-      var on = b.getAttribute("data-view") === view;
-      b.classList.toggle("on", on);
-      b.setAttribute("aria-pressed", on ? "true" : "false");
-    });
-  }
-  function applyView() {
-    markViewButtons();
-    if (view === "list") {
-      ec.setOption("noEventsContent", "No sessions this week");
-      ec.setOption("view", "listWeek");
-      elWeekbar.hidden = false;
-    } else {
-      ec.setOption("noEventsContent", "No sessions this month");
-      ec.setOption("view", "dayGridMonth");
-      elWeekbar.hidden = true;
-    }
-    showAt();
-  }
-
-  elPrev.addEventListener("click", function () { gotoMonth(-1); });
-  elNext.addEventListener("click", function () { gotoMonth(1); });
-  elToday.addEventListener("click", goToday);
-  document.querySelectorAll(".segbtn[data-view]").forEach(function (b) {
-    b.addEventListener("click", function () {
-      var v = b.getAttribute("data-view");
-      if (v !== view) { view = v; applyView(); }
-    });
+  makeCalendarView({
+    allEvents: function () { return EVENTS; },
+    onEventClick: function (ev) { showDetail(ev); },
+    onDateClick: null,
+    termStart: TERM_START, termEndExcl: TERM_END_EXCL,
+    initialSection: pickSection(), persistSection: true, sectionKey: KEY,
+    emptyGridText: "No sessions this month", emptyListText: "No sessions this week"
   });
-
-  // ---------- section A/B toggle (unchanged: swaps the event feed) ----------
-  function markButtons() {
-    document.querySelectorAll(".segbtn[data-sec]").forEach(function (b) {
-      var on = b.getAttribute("data-sec") === section;
-      b.classList.toggle("on", on);
-      b.setAttribute("aria-pressed", on ? "true" : "false");
-    });
-  }
-  function setSection(s) {
-    section = s;
-    ec.setOption("events", feed());
-    markButtons();
-    try { localStorage.setItem(KEY, s); } catch (e) {}
-    var u = new URL(location); u.searchParams.set("section", s); history.replaceState(null, "", u);
-  }
-  document.querySelectorAll(".segbtn[data-sec]").forEach(function (b) {
-    b.addEventListener("click", function () { setSection(b.getAttribute("data-sec")); });
-  });
-
-  // ---------- initial paint (opts already set the view/date, so just chrome) ----------
-  renderMonth();
-  renderWeeks();
-  markViewButtons();
-  markButtons();
-  elWeekbar.hidden = (view !== "list");
 
   // ---- detail overlay
   var ov = document.getElementById("ov"), card = document.getElementById("ovcard");
@@ -1087,6 +1054,9 @@ def render_admin(config: dict, schema: dict, repo_slug: str = "",
     cfg_defaults = {k: config.get(k) for k in _ADMIN_CONFIG_KEYS}
 
     page = _ADMIN_TEMPLATE
+    page = page.replace("__CAL_VIEW_CSS__", _CAL_VIEW_CSS)
+    page = page.replace("__CAL_VIEW_HTML__", _CAL_VIEW_HTML)
+    page = page.replace("__CAL_ENGINE_JS__", _CAL_ENGINE_JS)
     page = page.replace("__FONT_FACE__", _FONT_FACE)
     page = page.replace("__PALETTE__", _PALETTE)
     page = page.replace("__TITLE__", _esc(f"{cal_name} \u00b7 Editor"))
@@ -1110,6 +1080,7 @@ _ADMIN_TEMPLATE = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <title>__TITLE__</title>
+<link rel="stylesheet" href="vendor/event-calendar.min.css">
 <style>
 __FONT_FACE__
 :root {__PALETTE__}
@@ -1179,24 +1150,38 @@ a { color: inherit; }
 .valbanner li { margin: 2px 0; }
 .valbanner details summary { cursor: pointer; font-weight: 600; }
 
-/* week groups + event rows */
-.wkhead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
-  margin: 18px 0 8px; }
-.wkhead:first-child { margin-top: 2px; }
-.wkhead h3 { font-family: var(--serif); font-weight: 400; font-size: 18px; margin: 0; }
-.wkhead .wkrange { font-size: 12.5px; color: var(--ink-55); }
-.wkhead .wkadd { margin-left: auto; }
-.evrow { display: flex; align-items: center; gap: 12px; padding: 10px 12px;
-  border: 1.5px solid var(--ink-12); border-radius: 12px; margin-bottom: 8px;
-  cursor: pointer; background: var(--paper); }
-.evrow:hover { border-color: var(--ink-40); background: var(--hi-soft); }
-.chip { flex: 0 0 auto; font-size: 10.5px; font-weight: 700; letter-spacing: .03em;
-  padding: 3px 8px; border-radius: 999px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
-.evmain { flex: 1; min-width: 0; }
-.evtitle { font-weight: 600; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.evwhen { font-size: 12.5px; color: var(--ink-55); }
-.evflag { flex: 0 0 auto; font-size: 15px; }
-.emptywk { font-size: 13px; color: var(--ink-40); padding: 4px 2px 10px; }
+/* events tab: the same calendar view as the subscribe site (shared CSS) */
+__CAL_VIEW_CSS__
+.evtophead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.evtophead .addev { margin-left: auto; }
+
+/* upload-a-new-schedule slot (settings tab) */
+.dropzone { display: flex; flex-direction: column; align-items: center; gap: 5px;
+  border: 2px dashed var(--ink-40); border-radius: 12px; padding: 20px 16px;
+  text-align: center; cursor: pointer; background: var(--ink-07); color: var(--ink); }
+.dropzone:hover, .dropzone.dragover { border-color: var(--ink); background: var(--hi-soft); }
+.dropzone .dz-main { font-weight: 600; font-size: 14px; }
+.pastefb { margin-top: 12px; }
+.pastefb summary { cursor: pointer; }
+
+/* schedules library */
+.livebar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  border: 1.5px solid var(--ink-12); border-radius: 12px; padding: 12px 14px; margin-bottom: 4px; }
+.livebar > div { flex: 1; min-width: 0; }
+.livebar button { margin-left: auto; }
+.stagecard { border: 1.5px solid var(--ink-40); border-radius: 12px; padding: 14px; margin-top: 10px; background: var(--hi-soft); }
+.libgroup { border: 1.5px solid var(--ink-12); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; }
+.libghead { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.libgname { font-weight: 700; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.libghead .btn { margin-left: auto; }
+.librow { display: flex; align-items: center; gap: 10px; padding: 8px 6px; border-top: 1px solid var(--ink-12); }
+.librow:first-of-type { border-top: 0; }
+.libchk { width: 17px; height: 17px; flex: 0 0 auto; }
+.libmain { flex: 1; min-width: 0; }
+.libname { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.libbulk { position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px;
+  background: var(--paper); border-top: 1.5px solid var(--ink-12); padding: 10px 2px; margin-top: 6px; }
+.libbulk .btn { margin-left: auto; }
 
 /* form rows (modal + settings) */
 .mrow { display: grid; grid-template-columns: 116px 1fr; gap: 10px 12px;
@@ -1297,9 +1282,23 @@ a { color: inherit; }
     <div id="valbanner"></div>
     <div class="tabs">
       <button class="tab on" data-tab="events" type="button">Events</button>
+      <button class="tab" data-tab="schedules" type="button">Schedules</button>
       <button class="tab" data-tab="settings" type="button">Term &amp; settings</button>
     </div>
-    <div id="tab-events" class="card"></div>
+    <div id="tab-events" class="card">
+      <div class="evtophead">
+        <div class="seg" role="group" aria-label="Section filter">
+          <button class="segbtn" type="button" data-sec="ALL" aria-pressed="false">All</button>
+          <button class="segbtn" type="button" data-sec="A" aria-pressed="false">Section A</button>
+          <button class="segbtn" type="button" data-sec="B" aria-pressed="false">Section B</button>
+        </div>
+        <button id="btnAddEvent" class="btn small solid addev" type="button">+ Add event</button>
+      </div>
+      <div id="evlegend" class="legend"></div>
+      __CAL_VIEW_HTML__
+      <div class="noscript">This editor needs JavaScript enabled to load and edit the schedule.</div>
+    </div>
+    <div id="tab-schedules" class="card" hidden></div>
     <div id="tab-settings" class="card" hidden></div>
     <div id="published" class="card published" hidden></div>
   </div>
@@ -1314,6 +1313,7 @@ a { color: inherit; }
 <div id="modal" class="ov" hidden><div class="ovcard" id="modalCard"></div></div>
 <div id="toast" class="toast" hidden></div>
 
+<script src="vendor/event-calendar.min.js"></script>
 <script>
 (function () {
   "use strict";
@@ -1329,6 +1329,9 @@ a { color: inherit; }
   var doc = null, docSha = null, cfg = null, cfgSha = null;
   var dirtyDoc = false, dirtyCfg = false, busy = false, tab = "events";
   var editIdx = -1;   // index into doc.events being edited (-1 = adding new)
+  var lib = [];       // archived schedules: manifest entries {id,name,source,term,count,saved}
+  var libSel = {};    // ids checked for bulk delete
+  var pending = null; // a schedule staged for adding to the library
 
   function $(id) { return document.getElementById(id); }
   function esc(s) { var d = document.createElement("div"); d.textContent = s == null ? "" : s; return d.innerHTML; }
@@ -1344,12 +1347,10 @@ a { color: inherit; }
   // ---------- small date helpers (dates are plain ISO strings; no tz math) ----------
   function weekdayOf(dateStr) { var p = (dateStr || "").split("-");
     if (p.length !== 3) return ""; return WD[new Date(+p[0], +p[1] - 1, +p[2]).getDay()]; }
-  function fmtWhen(e) {
-    var p = e.date.split("-"), d = new Date(+p[0], +p[1] - 1, +p[2]);
-    var day = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()] + ", " + MON[d.getMonth()] + " " + (+p[2]) + ", " + p[0];
-    if (e.all_day || !e.start) return day + " \\u00b7 All day";
-    return day + " \\u00b7 " + e.start + "\\u2013" + e.end;
-  }
+  function pad2(n) { return (n < 10 ? "0" : "") + n; }
+  function todayStr() { var n = new Date(); return n.getFullYear() + "-" + pad2(n.getMonth() + 1) + "-" + pad2(n.getDate()); }
+  function nextDay(dateStr) { var p = dateStr.split("-"), d = new Date(+p[0], +p[1] - 1, +p[2]);
+    d.setDate(d.getDate() + 1); return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
 
   // ---------- GitHub API ----------
   function ghHeaders() { return { "Authorization": "Bearer " + token,
@@ -1431,12 +1432,6 @@ a { color: inherit; }
     });
     return { errors: errors, warnings: warnings };
   }
-  function eventHasError(e) {
-    if (!e.date || !e.title) return true;
-    if (!e.all_day && (!e.start || !e.end || e.end <= e.start)) return true;
-    return false;
-  }
-
   // ---------- state / chrome ----------
   function markDoc() { dirtyDoc = true; refreshChrome(); }
   function markCfg() { dirtyCfg = true; refreshChrome(); }
@@ -1490,7 +1485,7 @@ a { color: inherit; }
   function load() {
     $("gate").hidden = true;
     setBusy(true); $("btnPublish").textContent = "Publish";
-    Promise.all([ghGetFile("data/schedule.json"), ghGetFile("data/config.local.json")])
+    Promise.all([ghGetFile("data/schedule.json"), ghGetFile("data/config.local.json"), ghGetFile("library/index.json")])
       .then(function (res) {
         if (!res[0]) throw { msg: "data/schedule.json not found in " + repo + "." };
         doc = res[0].json; docSha = res[0].sha;
@@ -1500,10 +1495,14 @@ a { color: inherit; }
         cfg = clone(CFG_DEFAULTS);
         if (res[1]) { var o = res[1].json; CFG_KEYS.forEach(function (k) { if (o[k] !== undefined) cfg[k] = o[k]; }); cfgSha = res[1].sha; }
         else { cfgSha = null; }
+        lib = (res[2] && res[2].json && Array.isArray(res[2].json.schedules)) ? res[2].json.schedules : [];
+        libSel = {}; pending = null;
         dirtyDoc = dirtyCfg = false; busy = false;
         $("workspace").hidden = false; $("btnReload").hidden = false; $("btnPublish").hidden = false;
         $("published").hidden = true;
-        renderConnbar(); renderEvents(); renderSettings(); switchTab(tab); refreshChrome();
+        renderConnbar();
+        if (!cv) initCalendar(); else { refreshCalendar(); cv.goto(focusDate()); }
+        renderSettings(); switchTab(tab); refreshChrome();
       })
       .catch(function (e) { busy = false; handleErr(e); })
       .then(function () { setBusy(false); });
@@ -1542,54 +1541,56 @@ a { color: inherit; }
     return d;
   }
 
-  // ---------- events tab ----------
-  function eventGroups() {
-    var blocks = doc.meta.week_blocks || [];
-    var groups = blocks.map(function (b) { return { block: b, items: [] }; });
-    var unfiled = { block: null, items: [] };
-    doc.events.forEach(function (e, idx) {
-      var g = null;
-      for (var i = 0; i < blocks.length; i++) if (e.date >= blocks[i].start && e.date <= blocks[i].end) { g = groups[i]; break; }
-      (g || unfiled).items.push({ e: e, idx: idx });
-    });
-    if (unfiled.items.length) groups.push(unfiled);
-    groups.forEach(function (g) { g.items.sort(function (a, b) {
-      if (a.e.date !== b.e.date) return a.e.date < b.e.date ? -1 : 1;
-      return (a.e.start || "") < (b.e.start || "") ? -1 : 1; }); });
-    return groups;
-  }
-  function renderEvents() {
-    var host = $("tab-events");
-    host.innerHTML = '<div class="wkhead" style="margin-top:0"><h3>All events</h3>'
-      + '<span class="wkrange">' + doc.events.length + ' total</span>'
-      + '<button class="btn small solid wkadd" data-act="add" type="button">+ Add event</button></div>';
-    eventGroups().forEach(function (g) {
-      var head = document.createElement("div"); head.className = "wkhead";
-      var label = g.block ? g.block.label : "Unfiled (outside every week block)";
-      var range = g.block ? (g.block.start + " \\u2013 " + g.block.end) : "";
-      var addDate = g.block ? g.block.start : (cfg.term_start || doc.events[0] && doc.events[0].date || "");
-      head.innerHTML = '<h3>' + esc(label) + '</h3><span class="wkrange">' + esc(range) + '</span>'
-        + '<button class="btn small ghost wkadd" data-act="add" data-date="' + attr(addDate) + '" type="button">+ Add</button>';
-      host.appendChild(head);
-      if (!g.items.length) { var em = document.createElement("div"); em.className = "emptywk"; em.textContent = "No events."; host.appendChild(em); return; }
-      g.items.forEach(function (it) {
-        var e = it.e, row = document.createElement("div");
-        row.className = "evrow"; row.setAttribute("data-act", "edit"); row.setAttribute("data-idx", it.idx);
-        var hue = HUES[e.subject] || "#ddd";
-        var flag = eventHasError(e) ? '<span class="evflag" title="Needs fixing">\\u26a0\\ufe0f</span>' : "";
-        row.innerHTML = '<span class="chip" style="background:' + hue + ';color:' + SUBJECT_TEXT + '">' + esc(e.subject) + '</span>'
-          + '<div class="evmain"><div class="evtitle">' + esc(e.activity + (e.title ? ": " + e.title : "")) + '</div>'
-          + '<div class="evwhen">' + esc(fmtWhen(e)) + (e.section && e.section !== "ALL" ? " \\u00b7 Sec " + esc(e.section) : "") + '</div></div>' + flag;
-        host.appendChild(row);
+  // ---------- events tab: the same month/list calendar as the subscribe site,
+  //            but a tap opens the editor (and a tap on an empty day adds one) ----------
+  __CAL_ENGINE_JS__
+
+  var cv = null;   // the calendar view; created once, then refreshed in place
+
+  function toCalendarEvents() {
+    var out = [];
+    doc.events.forEach(function (e, i) {
+      if (!e.date) return;   // undated events can't be placed; the banner flags them
+      var allDay = !!(e.all_day || !e.start), hue = HUES[e.subject] || "#ddd";
+      out.push({
+        id: String(i), title: e.title || "(untitled)",
+        start: allDay ? e.date : e.date + " " + e.start + ":00",
+        end: allDay ? nextDay(e.date) : e.date + " " + e.end + ":00",
+        allDay: allDay, backgroundColor: hue, textColor: SUBJECT_TEXT,
+        extendedProps: { sec: e.section || "ALL" }
       });
     });
+    return out;
   }
-  $("tab-events").addEventListener("click", function (ev) {
-    var t = ev.target.closest("[data-act]"); if (!t) return;
-    var act = t.getAttribute("data-act");
-    if (act === "add") openEditor(-1, t.getAttribute("data-date") || "");
-    else if (act === "edit") openEditor(+t.getAttribute("data-idx"), "");
-  });
+  function focusDate() {
+    // Open where the schedule actually is: today if it falls within the events'
+    // span, otherwise the first event (so a freshly uploaded term is visible).
+    var today = todayStr();
+    var ds = doc.events.map(function (e) { return e.date; }).filter(Boolean).sort();
+    if (ds.length && today >= ds[0] && today <= ds[ds.length - 1]) return today;
+    return ds[0] || cfg.term_start || today;
+  }
+  function renderLegend() {
+    var seen = []; doc.events.forEach(function (e) { if (seen.indexOf(e.subject) < 0) seen.push(e.subject); });
+    $("evlegend").innerHTML = seen.map(function (s) {
+      return '<span class="lg"><i style="background:' + (HUES[s] || "#666") + '"></i>' + esc(s) + '</span>'; }).join("");
+  }
+  function initCalendar() {
+    if (typeof EventCalendar === "undefined") {
+      var ns = $("tab-events").querySelector(".noscript"); if (ns) ns.classList.add("show"); return; }
+    cv = makeCalendarView({
+      allEvents: toCalendarEvents,
+      onEventClick: function (ev) { openEditor(+ev.id, ""); },
+      onDateClick: function (dateStr) { openEditor(-1, dateStr); },
+      termStart: null, termEndExcl: null, focusDate: focusDate(),
+      initialSection: "ALL", persistSection: false,
+      emptyGridText: "No events this month \\u2013 tap a day to add one",
+      emptyListText: "No events this week"
+    });
+    renderLegend();
+  }
+  function refreshCalendar() { if (cv) cv.refresh(); renderLegend(); }
+  $("btnAddEvent").addEventListener("click", function () { openEditor(-1, focusDate()); });
 
   // ---------- event modal ----------
   function optlist(list, val) { return list.map(function (o) {
@@ -1640,11 +1641,11 @@ a { color: inherit; }
     if (!isNew) {
       $("mDelete").addEventListener("click", function () {
         if (!confirm("Delete this event?")) return;
-        doc.events.splice(idx, 1); closeModal(); renderEvents(); markDoc(); toast("Event deleted.");
+        doc.events.splice(idx, 1); closeModal(); refreshCalendar(); markDoc(); toast("Event deleted.");
       });
       $("mDup").addEventListener("click", function () {
         var copy = canonEvent(collectModal()); doc.events.splice(idx + 1, 0, copy);
-        markDoc(); closeModal(); renderEvents(); openEditor(idx + 1, ""); toast("Duplicated \\u2013 editing the copy.");
+        markDoc(); closeModal(); refreshCalendar(); openEditor(idx + 1, ""); toast("Duplicated \\u2013 editing the copy.");
       });
     }
   }
@@ -1661,7 +1662,7 @@ a { color: inherit; }
     else if (!e.all_day && e.end <= e.start) err = "End time must be after the start time.";
     if (err) { var m = $("mErr"); m.textContent = err; m.hidden = false; return; }
     if (editIdx >= 0) doc.events[editIdx] = e; else doc.events.push(e);
-    closeModal(); renderEvents(); markDoc(); toast("Saved \\u2013 remember to Publish.");
+    closeModal(); refreshCalendar(); markDoc(); toast("Saved \\u2013 remember to Publish.");
   }
   function closeModal() { $("modal").hidden = true; $("modalCard").innerHTML = ""; editIdx = -1; }
   $("modal").addEventListener("click", function (e) { if (e.target === $("modal")) closeModal(); });
@@ -1679,7 +1680,7 @@ a { color: inherit; }
       + '<div class="mrow"><label>Term label</label><input id="s-term" type="text" value="' + attr(doc.meta.term || "") + '"></div>'
       + '<div class="mrow"><label>Source title</label><input id="s-source" type="text" value="' + attr(doc.meta.source_title || "") + '"></div>'
       + '<div class="sect-title">Week blocks</div>'
-      + '<p class="muted small" style="margin-top:-4px">These group events on this page and set each event\\'s week. One row per week.</p>'
+      + '<p class="muted small" style="margin-top:-4px">The weeks of the term, from the source PDF \\u2013 reference metadata, one row per week.</p>'
       + '<div id="wblocks"></div>'
       + '<button id="s-addwb" class="btn small ghost" type="button">+ Add week block</button>'
       + '<div class="sect-title">Reviewer notes</div>'
@@ -1695,11 +1696,7 @@ a { color: inherit; }
       + '<div class="mrow"><label>Term start</label><input id="c-tstart" type="date" value="' + attr(cfg.term_start || "") + '"></div>'
       + '<div class="mrow"><label>Term end</label><input id="c-tend" type="date" value="' + attr(cfg.term_end || "") + '"></div>'
       + '<p class="field-note">Events outside this window publish but are flagged as warnings.</p>'
-      + '<hr class="hr">'
-      + '<div class="sect-title">Replace the whole schedule</div>'
-      + '<p class="muted small" style="margin-top:-4px">Paste a fresh schedule.json (e.g. Claude\\'s output for a new bimonthly) to replace everything at once.</p>'
-      + '<textarea id="s-import" rows="5" placeholder="{ &quot;meta&quot;: &hellip;, &quot;events&quot;: [ &hellip; ] }" style="width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;border:1.5px solid var(--ink-40);border-radius:9px;padding:10px"></textarea>'
-      + '<button id="s-doimport" class="btn small danger" type="button">Replace document</button>';
+      + '<p class="muted small">To upload a different schedule or manage saved ones, use the <b>Schedules</b> tab.</p>';
 
     renderWblocks();
     $("s-addwb").addEventListener("click", function () {
@@ -1715,7 +1712,6 @@ a { color: inherit; }
     bindChk("c-persubj", function (v) { cfg.emit_per_subject_feeds = v; markCfg(); });
     bindText("c-tstart", function (v) { cfg.term_start = v; markCfg(); });
     bindText("c-tend", function (v) { cfg.term_end = v; markCfg(); });
-    $("s-doimport").addEventListener("click", doImport);
   }
   function renderWblocks() {
     var host = $("wblocks"); host.innerHTML = "";
@@ -1729,22 +1725,208 @@ a { color: inherit; }
         inp.addEventListener("input", function () { b[inp.getAttribute("data-f")] = inp.value; markDoc(); });
       });
       row.querySelector("[data-del]").addEventListener("click", function () {
-        doc.meta.week_blocks.splice(i, 1); renderWblocks(); renderEvents(); markDoc(); });
+        doc.meta.week_blocks.splice(i, 1); renderWblocks(); markDoc(); });
       host.appendChild(row);
     });
   }
-  function doImport() {
-    var raw = $("s-import").value.trim(); if (!raw) return;
-    var parsed; try { parsed = JSON.parse(raw); } catch (e) { toast("That is not valid JSON.", "err"); return; }
-    if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.events) || !parsed.meta) {
-      toast("Needs a top-level meta object and events array.", "err"); return; }
-    if (!confirm("Replace ALL " + doc.events.length + " events with the " + parsed.events.length + " pasted ones?")) return;
-    doc = parsed;
+  // ---------- schedules library (archive of schedules, one live at a time) ------
+  // The live schedule stays data/schedule.json (unchanged feed URLs). Archived
+  // schedules live under library/ (outside data/, so editing the archive never
+  // triggers a rebuild). A single library/index.json manifest lists them, so the
+  // list loads in one request; multi-file changes commit atomically via the Git
+  // Data API (one commit, so the archive stays consistent).
+  function findLib(id) { for (var i = 0; i < lib.length; i++) if (lib[i].id === id) return lib[i]; return null; }
+  function slugify(s) { return (String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40)) || "schedule"; }
+  function makeId(name) { return new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 14) + "-" + slugify(name); }
+
+  // Build one atomic commit from file writes [{path,text}] and deletes [path].
+  function ghGit(path, opts) { return api("/repos/" + repo + "/git/" + path, opts); }
+  function ghGitJson(path, opts) {
+    return ghGit(path, opts).then(function (r) {
+      if (r.status === 401 || r.status === 403) throw { auth: true, msg: "Token rejected (" + r.status + "). Needs Contents: Read and write." };
+      if (!r.ok) return r.json().then(function (j) { throw { msg: j.message || ("GitHub request failed (" + r.status + ").") }; },
+        function () { throw { msg: "GitHub request failed (" + r.status + ")." }; });
+      return r.json();
+    });
+  }
+  function ghCommit(message, writes, deletes) {
+    return ghGitJson("ref/heads/main").then(function (ref) {
+      var parent = ref.object.sha;
+      return ghGitJson("commits/" + parent).then(function (commit) {
+        var tree = [];
+        (writes || []).forEach(function (w) { tree.push({ path: w.path, mode: "100644", type: "blob", content: w.text }); });
+        (deletes || []).forEach(function (p) { tree.push({ path: p, mode: "100644", type: "blob", sha: null }); });
+        return ghGitJson("trees", { method: "POST", body: JSON.stringify({ base_tree: commit.tree.sha, tree: tree }) }).then(function (t) {
+          return ghGitJson("commits", { method: "POST", body: JSON.stringify({ message: message, tree: t.sha, parents: [parent] }) }).then(function (nc) {
+            return ghGitJson("refs/heads/main", { method: "PATCH", body: JSON.stringify({ sha: nc.sha }) }).then(function () { return nc; });
+          });
+        });
+      });
+    });
+  }
+  function libBusy(on) { busy = on; refreshChrome(); }
+
+  function setWorkingDoc(newDoc) {
+    doc = clone(newDoc);
+    if (!doc.meta) doc.meta = {}; if (!Array.isArray(doc.events)) doc.events = [];
     if (!Array.isArray(doc.meta.week_blocks)) doc.meta.week_blocks = [];
     if (!Array.isArray(doc.meta.review_notes)) doc.meta.review_notes = [];
-    $("s-import").value = ""; markDoc(); renderEvents(); renderSettings(); switchTab("events");
-    toast("Document replaced \\u2013 review, then Publish.");
+    markDoc(); refreshCalendar(); if (cv) cv.goto(focusDate()); renderSettings(); switchTab("events");
   }
+
+  // ---- staging: a file/paste becomes a reviewable entry before it is saved ----
+  function stageDocument(parsed, defName, defSource) {
+    if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.events) || !parsed.meta) {
+      toast("Needs a top-level \\u201cmeta\\u201d object and \\u201cevents\\u201d array.", "err"); return; }
+    pending = { doc: parsed, name: parsed.meta.term || defName || "Schedule",
+      source: defSource || parsed.meta.source_title || "", count: parsed.events.length };
+    renderStage();
+  }
+  function readScheduleFile(f) {
+    if (f.size > 5 * 1024 * 1024) { toast("That file is too large to be a schedule.", "err"); return; }
+    var rd = new FileReader();
+    rd.onload = function () { var p; try { p = JSON.parse(String(rd.result)); } catch (e) { toast("That file is not valid JSON.", "err"); return; }
+      stageDocument(p, f.name.replace(/\\.json$/i, ""), f.name); };
+    rd.onerror = function () { toast("Could not read that file.", "err"); };
+    rd.readAsText(f);
+  }
+  function doImport() { var raw = $("s-import").value.trim(); if (!raw) return;
+    var p; try { p = JSON.parse(raw); } catch (e) { toast("That is not valid JSON.", "err"); return; } stageDocument(p, "", ""); }
+  function saveActiveToLibrary() { stageDocument({ meta: doc.meta, events: doc.events.map(canonEvent) }, doc.meta.term || "Schedule", doc.meta.source_title || ""); }
+
+  function renderStage() {
+    var el = $("lib-stage"); if (!el) return;
+    if (!pending) { el.innerHTML = ""; return; }
+    el.innerHTML = '<div class="stagecard"><div class="muted small">Ready to add &middot; ' + pending.count + ' events</div>'
+      + '<div class="mrow"><label>Name</label><input id="st-name" type="text" value="' + attr(pending.name) + '"></div>'
+      + '<div class="mrow"><label>Source (PDF)</label><input id="st-source" type="text" value="' + attr(pending.source) + '" placeholder="e.g. L2 SY2026 Calendar.pdf"></div>'
+      + '<p class="field-note">Schedules sharing a source are grouped together and can be deleted as a group.</p>'
+      + '<div class="mfoot"><button id="st-cancel" class="btn small ghost" type="button">Cancel</button><span class="grow"></span>'
+      + '<button id="st-addlive" class="btn small ghost" type="button">Add &amp; make live</button>'
+      + '<button id="st-addlib" class="btn small solid" type="button">Add to library</button></div></div>';
+    $("st-name").addEventListener("input", function () { pending.name = this.value; });
+    $("st-source").addEventListener("input", function () { pending.source = this.value; });
+    $("st-cancel").addEventListener("click", function () { pending = null; renderStage(); });
+    $("st-addlib").addEventListener("click", function () { commitAddToLibrary(false); });
+    $("st-addlive").addEventListener("click", function () { commitAddToLibrary(true); });
+  }
+  function commitAddToLibrary(makeLive) {
+    if (!pending || busy) return;
+    var id = makeId(pending.name);
+    var entry = { id: id, name: pending.name || id, source: pending.source || "",
+      term: pending.doc.meta.term || "", count: pending.doc.events.length, saved: new Date().toISOString() };
+    var writes = [{ path: "library/" + id + ".json", text: JSON.stringify(pending.doc, null, 2) },
+                  { path: "library/index.json", text: JSON.stringify({ schedules: lib.concat([entry]) }, null, 2) }];
+    var staged = pending.doc;
+    libBusy(true);
+    ghCommit("Add \\u201c" + entry.name + "\\u201d to schedule library", writes, [])
+      .then(function () {
+        lib = lib.concat([entry]); pending = null; libBusy(false);
+        if (makeLive) { setWorkingDoc(staged); toast("Saved and loaded \\u2013 Publish to make it the live calendar."); }
+        else { renderSchedules(); toast("Added \\u201c" + entry.name + "\\u201d to the library."); }
+      })
+      .catch(function (e) { libBusy(false); handleErr(e); });
+  }
+  function setActive(id) {
+    var entry = findLib(id); if (!entry || busy) return;
+    if ((dirtyDoc || dirtyCfg) && !confirm("Load \\u201c" + (entry.name || id) + "\\u201d as the working copy? Your unsaved edits will be discarded.")) return;
+    libBusy(true);
+    ghGetFile("library/" + id + ".json").then(function (res) {
+      if (!res) throw { msg: "That library file is missing." };
+      libBusy(false); setWorkingDoc(res.json);
+      toast("Loaded \\u201c" + (entry.name || id) + "\\u201d \\u2013 review, then Publish to make it the live calendar.");
+    }).catch(function (e) { libBusy(false); handleErr(e); });
+  }
+  function deleteSchedules(ids) {
+    ids = (ids || []).filter(function (id) { return !!findLib(id); });
+    if (!ids.length || busy) return;
+    if (!confirm("Delete " + ids.length + " schedule" + (ids.length > 1 ? "s" : "") + " from the library? This cannot be undone.")) return;
+    var remain = lib.filter(function (s) { return ids.indexOf(s.id) < 0; });
+    var writes = [{ path: "library/index.json", text: JSON.stringify({ schedules: remain }, null, 2) }];
+    var deletes = ids.map(function (id) { return "library/" + id + ".json"; });
+    libBusy(true);
+    ghCommit("Delete " + ids.length + " schedule(s) from library", writes, deletes)
+      .then(function () { lib = remain; libSel = {}; libBusy(false); renderSchedules();
+        toast("Deleted " + ids.length + " schedule" + (ids.length > 1 ? "s" : "") + "."); })
+      .catch(function (e) { libBusy(false); handleErr(e); });
+  }
+
+  function libraryGroupsHtml() {
+    var groups = {}, order = [];
+    lib.forEach(function (s) { var g = s.source || "(no source)"; if (!groups[g]) { groups[g] = []; order.push(g); } groups[g].push(s); });
+    return order.map(function (g) {
+      var rows = groups[g].map(function (s) {
+        return '<div class="librow"><input type="checkbox" class="libchk" data-id="' + attr(s.id) + '"' + (libSel[s.id] ? " checked" : "") + '>'
+          + '<div class="libmain"><div class="libname">' + esc(s.name || s.term || s.id) + '</div>'
+          + '<div class="muted small">' + esc(s.term || "") + ' &middot; ' + (s.count || 0) + ' events'
+          + (s.saved ? ' &middot; saved ' + esc(String(s.saved).slice(0, 10)) : '') + '</div></div>'
+          + '<button class="btn small solid" data-act="activate" data-id="' + attr(s.id) + '" type="button">Set active</button>'
+          + '<button class="btn small danger" data-act="delone" data-id="' + attr(s.id) + '" type="button" aria-label="Delete">\\u2715</button></div>';
+      }).join("");
+      return '<div class="libgroup"><div class="libghead"><span class="libgname">\\ud83d\\udcc4 ' + esc(g) + '</span>'
+        + '<span class="muted small">' + groups[g].length + '</span>'
+        + '<button class="btn small danger" data-act="delgroup" data-group="' + attr(g) + '" type="button">Delete group</button></div>'
+        + rows + '</div>';
+    }).join("");
+  }
+  function renderSchedules() {
+    var host = $("tab-schedules"); if (!doc) { host.innerHTML = ""; return; }
+    var liveNote = (dirtyDoc || dirtyCfg) ? "unpublished \\u2013 Publish to make this the live calendar"
+                                          : "this is what the public feeds serve";
+    host.innerHTML =
+      '<div class="sect-title">Live now</div>'
+      + '<div class="livebar"><div><b>' + esc(doc.meta.term || doc.meta.source_title || "Current schedule") + '</b>'
+      + '<span class="muted small"> &middot; ' + doc.events.length + ' events &middot; ' + liveNote + '</span></div>'
+      + '<button id="lib-savecur" class="btn small ghost" type="button">Save a copy to library</button></div>'
+      + '<div class="sect-title">Add a schedule</div>'
+      + '<p class="muted small" style="margin-top:-4px">Upload a <code>schedule.json</code> (e.g. Claude\\'s output from a PDF). It is saved to your library; <b>Set active</b> and Publish to make it the live, subscribable calendar.</p>'
+      + '<label id="s-drop" class="dropzone" for="s-file"><input id="s-file" type="file" accept="application/json,.json" hidden>'
+      +   '<span class="dz-main">\\ud83d\\udcc5 Drop schedule.json here, or tap to choose a file</span>'
+      +   '<span id="s-fname" class="muted small"></span></label>'
+      + '<div id="lib-stage"></div>'
+      + '<details class="pastefb"><summary class="muted small">Or paste JSON instead</summary>'
+      +   '<textarea id="s-import" rows="5" placeholder="{ &quot;meta&quot;: &hellip;, &quot;events&quot;: [ &hellip; ] }" style="width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;border:1.5px solid var(--ink-40);border-radius:9px;padding:10px"></textarea>'
+      +   '<button id="s-doimport" class="btn small ghost" type="button">Use pasted JSON</button></details>'
+      + '<div class="sect-title">Library <span class="muted small">(' + lib.length + ')</span></div>'
+      + (lib.length ? libraryGroupsHtml()
+          : '<p class="muted small">No archived schedules yet. Upload one above, or \\u201cSave a copy to library\\u201d to keep the current one before switching.</p>')
+      + '<div id="lib-bulk" class="libbulk" hidden><span id="lib-selcount" class="muted small"></span>'
+      +   '<button id="lib-delsel" class="btn small danger" type="button">Delete selected</button></div>';
+    wireSchedules();
+  }
+  function updateBulk() {
+    var n = Object.keys(libSel).length, bar = $("lib-bulk"); if (!bar) return;
+    bar.hidden = n === 0;
+    if ($("lib-selcount")) $("lib-selcount").textContent = n + " selected";
+  }
+  function wireSchedules() {
+    var dz = $("s-drop");
+    if (dz) {
+      dz.addEventListener("dragover", function (e) { e.preventDefault(); dz.classList.add("dragover"); });
+      dz.addEventListener("dragleave", function () { dz.classList.remove("dragover"); });
+      dz.addEventListener("drop", function (e) { e.preventDefault(); dz.classList.remove("dragover");
+        var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) readScheduleFile(f); });
+      $("s-file").addEventListener("change", function () { var f = this.files && this.files[0]; if (f) readScheduleFile(f); this.value = ""; });
+    }
+    if ($("s-doimport")) $("s-doimport").addEventListener("click", doImport);
+    if ($("lib-savecur")) $("lib-savecur").addEventListener("click", saveActiveToLibrary);
+    if ($("lib-delsel")) $("lib-delsel").addEventListener("click", function () { deleteSchedules(Object.keys(libSel)); });
+    host_each("[data-act]", function (b) {
+      b.addEventListener("click", function () {
+        var act = b.getAttribute("data-act"), id = b.getAttribute("data-id");
+        if (act === "activate") setActive(id);
+        else if (act === "delone") deleteSchedules([id]);
+        else if (act === "delgroup") { var g = b.getAttribute("data-group");
+          deleteSchedules(lib.filter(function (s) { return (s.source || "(no source)") === g; }).map(function (s) { return s.id; })); }
+      });
+    });
+    host_each(".libchk", function (c) {
+      c.addEventListener("change", function () { var id = c.getAttribute("data-id");
+        if (c.checked) libSel[id] = true; else delete libSel[id]; updateBulk(); });
+    });
+    renderStage(); updateBulk();
+  }
+  function host_each(sel, fn) { $("tab-schedules").querySelectorAll(sel).forEach(fn); }
   function bindText(id, fn) { var el = $(id); if (el) el.addEventListener("input", function () { fn(el.value); }); }
   function bindSel(id, fn) { var el = $(id); if (el) el.addEventListener("change", function () { fn(el.value); }); }
   function bindChk(id, fn) { var el = $(id); if (el) el.addEventListener("change", function () { fn(el.checked); }); }
@@ -1752,7 +1934,11 @@ a { color: inherit; }
   // ---------- tabs ----------
   function switchTab(name) { tab = name;
     document.querySelectorAll(".tab").forEach(function (b) { b.classList.toggle("on", b.getAttribute("data-tab") === name); });
-    $("tab-events").hidden = name !== "events"; $("tab-settings").hidden = name !== "settings"; }
+    $("tab-events").hidden = name !== "events";
+    $("tab-settings").hidden = name !== "settings";
+    $("tab-schedules").hidden = name !== "schedules";
+    if (name === "schedules") renderSchedules();
+  }
   document.querySelectorAll(".tab").forEach(function (b) {
     b.addEventListener("click", function () { switchTab(b.getAttribute("data-tab")); }); });
 

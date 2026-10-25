@@ -35,11 +35,22 @@ def test_render_admin_is_self_contained_with_no_unreplaced_tokens():
     doc = preview.render_admin(CONFIG, SCHEMA, repo_slug="owner/repo")
     assert doc.startswith("<!doctype html>")
     assert not TOKEN_RE.search(doc), "left an unreplaced __TEMPLATE__ token"
-    # Fully self-contained: no external scripts or stylesheets. The only network
-    # endpoint is the GitHub API, called from inline JS at runtime.
-    assert "<script src=" not in doc
-    assert "stylesheet" not in doc
+    # Self-contained: scripts/styles are same-origin (the vendored calendar lib),
+    # never fetched from an external host. The only runtime network endpoint is
+    # the GitHub API, called from inline JS.
+    assert '<script src="http' not in doc
+    assert 'stylesheet" href="http' not in doc
     assert "https://api.github.com" in doc
+
+
+def test_render_admin_reuses_shared_calendar_view():
+    doc = preview.render_admin(CONFIG, SCHEMA, repo_slug="owner/repo")
+    # same vendored library and the same calendar engine as the subscribe page
+    assert "vendor/event-calendar.min.js" in doc
+    assert "vendor/event-calendar.min.css" in doc
+    assert "makeCalendarView(" in doc
+    for marker in ('id="cal"', 'id="btnToday"', 'id="btnAddEvent"'):
+        assert marker in doc
 
 
 def test_render_admin_bakes_schema_enums_for_dropdowns():
@@ -62,6 +73,27 @@ def test_render_admin_bakes_repo_and_editable_settings():
     # core editor controls are wired up
     for marker in ('id="btnPublish"', 'id="tab-events"', 'id="modalCard"'):
         assert marker in doc
+
+
+def test_render_admin_has_schedule_upload_slot():
+    doc = preview.render_admin(CONFIG, SCHEMA, repo_slug="owner/repo")
+    assert 'data-tab="schedules"' in doc and 'id="tab-schedules"' in doc
+    assert 'id="s-file"' in doc and 'type="file"' in doc   # file picker
+    assert 'id="s-drop"' in doc                             # drop zone
+    assert "readScheduleFile(" in doc and "stageDocument(" in doc
+
+
+def test_render_admin_has_library_management():
+    doc = preview.render_admin(CONFIG, SCHEMA, repo_slug="owner/repo")
+    # the archive lives outside data/ so managing it never triggers a feed rebuild
+    assert "library/index.json" in doc
+    # management actions: set-active, single/bulk/group delete, save current
+    for fn in ("setActive(", "deleteSchedules(", "saveActiveToLibrary(", "commitAddToLibrary("):
+        assert fn in doc
+    # atomic multi-file changes via the Git Data API (one commit per change)
+    assert "ghCommit(" in doc and '"/repos/" + repo + "/git/"' in doc
+    # the live schedule and its feed URLs are untouched (still one schedule.json)
+    assert "data/schedule.json" in doc
 
 
 def test_render_admin_empty_repo_keeps_local_repo_field():
