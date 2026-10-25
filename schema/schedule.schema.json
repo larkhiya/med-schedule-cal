@@ -44,7 +44,7 @@
       "properties": {
         "subject": {
           "type": "string",
-          "enum": ["PATHOLOGY", "PHARMACOLOGY", "MICRO", "PD", "PREVMED", "PSYCHIATRY", "RESEARCH", "OTHER"]
+          "enum": ["PATHOLOGY", "PHARMACOLOGY", "MICRO", "PD", "PREVMED", "PSYCHIATRY", "RESEARCH", "LEGALMED", "OTHER"]
         },
         "activity": {
           "type": "string",

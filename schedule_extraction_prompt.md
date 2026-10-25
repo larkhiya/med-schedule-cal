@@ -60,7 +60,8 @@ than the single fence.
 ## Field rules
 
 - **subject**: use the label as printed — one of `PATHOLOGY`, `PHARMACOLOGY`,
-  `MICRO`, `PD`, `PREVMED`, `PSYCHIATRY`, `RESEARCH`; use `OTHER` if none fit.
+  `MICRO`, `PD`, `PREVMED`, `PSYCHIATRY`, `RESEARCH`, `LEGALMED` (Legal / Forensic
+  Medicine); use `OTHER` if none fit (e.g. OSCE, cross-subject items).
 - **activity**: one of `Lecture`, `Laboratory`, `Exam`, `CBL`,
   `Independent Study`, `Orientation`, `PD`, `Holiday`, `Other`.
   ("CBL" = Case Based Learning. "PD" cells describe skills/history-taking

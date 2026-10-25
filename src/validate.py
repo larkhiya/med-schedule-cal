@@ -22,7 +22,7 @@ except ImportError:  # pragma: no cover
 
 KNOWN_SUBJECTS = {
     "PATHOLOGY", "PHARMACOLOGY", "MICRO", "PD", "PREVMED",
-    "PSYCHIATRY", "RESEARCH", "OTHER",
+    "PSYCHIATRY", "RESEARCH", "LEGALMED", "OTHER",
 }
 
 WEEKDAYS = {
