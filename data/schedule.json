@@ -44,14 +44,7 @@
         "end": "2026-12-05"
       }
     ],
-    "review_notes": [
-      "Term window for this schedule is 2026-10-12 to 2026-12-05 (update term_start/term_end in the editor's Term & settings when you make it live).",
-      "Untimed items (Saturday Psychiatry lectures/exams, PrevMed afternoon lectures, some Pathology/PD exams, Research items, BLS) have no printed clock time and are entered as all-day (confidence medium).",
-      "MICRO Fridays print the quiz/exam and the lecture/case-report with the same 1:30 PM start; split into back-to-back events to avoid overlaps (Oct 23, Oct 30, Nov 27).",
-      "Nov 6 MICRO Long Exam 3 had no explicit time; placed in the 1:30-3:30 PM slot (confidence medium).",
-      "Legal Medicine and OSCE are not in the subject list; filed under OTHER. BLS/Hx-taking/guided-demo are filed under PD.",
-      "All week headers read 2026 and match their weekdays - no year corrections needed."
-    ]
+    "review_notes": []
   },
   "events": [
     {
