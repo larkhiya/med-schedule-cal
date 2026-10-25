@@ -1,0 +1,9 @@
+{
+  "calendar_name": "UC MED Level 2 - 2nd Bimonthly",
+  "section": "B",
+  "section_chooser": true,
+  "include_untimed": true,
+  "emit_per_subject_feeds": true,
+  "term_start": "2026-10-12",
+  "term_end": "2026-12-15"
+}
