@@ -1,0 +1,12 @@
+{
+  "schedules": [
+    {
+      "id": "20261025162954-sy-2026-2027-second-bimonthly",
+      "name": "SY 2026-2027 Second Bimonthly",
+      "source": "YL2-BM2-schedule.json",
+      "term": "SY 2026-2027 Second Bimonthly",
+      "count": 159,
+      "saved": "2026-10-25T16:29:54.881Z"
+    }
+  ]
+}
